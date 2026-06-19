@@ -51,10 +51,10 @@ type AgentIdentitySpec struct {
 }
 // CertificateInfo holds details about the issued certificate
 type CertificateInfo struct {
-	SerialNumber string `json:"serialNumber"`
-	NotBefore    string `json:"notBefore"`
-	NotAfter     string `json:"notAfter"`
-	Fingerprint  string `json:"fingerprint"`
+	SerialNumber string      `json:"serialNumber"`
+	NotBefore    metav1.Time `json:"notBefore"`
+	NotAfter     metav1.Time `json:"notAfter"`
+	Fingerprint  string      `json:"fingerprint"`
 }
 
 // AgentIdentityStatus defines the observed state of AgentIdentity.
@@ -73,6 +73,8 @@ type AgentIdentityStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="Agent-ID",type=string,JSONPath=".status.agentID"
 
 // AgentIdentity is the Schema for the agentidentities API
 type AgentIdentity struct {

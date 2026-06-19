@@ -14,7 +14,14 @@ spec:
     singular: agentidentity
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.agentID
+      name: Agent-ID
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: AgentIdentity is the Schema for the agentidentities API
@@ -84,8 +91,10 @@ spec:
                   fingerprint:
                     type: string
                   notAfter:
+                    format: date-time
                     type: string
                   notBefore:
+                    format: date-time
                     type: string
                   serialNumber:
                     type: string
