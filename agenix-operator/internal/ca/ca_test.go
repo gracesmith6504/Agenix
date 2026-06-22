@@ -1,6 +1,7 @@
 package ca
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
@@ -8,6 +9,8 @@ import (
 	"testing"
 	"time"
 )
+
+const testSpiffeID = "spiffe://example.test/ns/default/sa/my-agent"
 
 func parseCertPEM(t *testing.T, certPEM []byte) *x509.Certificate {
 	t.Helper()
@@ -20,7 +23,7 @@ func parseCertPEM(t *testing.T, certPEM []byte) *x509.Certificate {
 		t.Fatalf("failed to parse certificate: %v", err)
 	}
 	return cert
-} //helper by Cursor
+} // helper by Cursor
 
 func TestNewCA(t *testing.T) {
 	ca, err := NewCA()
@@ -45,12 +48,12 @@ func TestNewCA(t *testing.T) {
 		t.Errorf("expected P-256 curve, got %s", ca.PrivateKey.Curve.Params().Name)
 	}
 
-	//verify IsCA = true
+	// verify IsCA = true
 	if !ca.Certificate.IsCA {
 		t.Error("expected IsCA=true")
 	}
 
-	//verify self signed
+	// verify self signed
 	if ca.Certificate.Issuer.String() != ca.Certificate.Subject.String() {
 		t.Error("expected self signed cert")
 	}
@@ -62,16 +65,16 @@ func TestIssueCertificate(t *testing.T) {
 		t.Fatalf("NewCA returned an error: %v", err)
 	}
 
-	spiffeID := "spiffe://example.test/ns/default/sa/my-agent"
+	spiffeID := testSpiffeID
 	ttl := 24 * time.Hour
 
-	//issue certificate
+	// issue certificate
 	certPEM, keyPEM, err := ca.IssueCertificate(spiffeID, ttl)
 	if err != nil {
 		t.Fatalf("IssueCertificate returned error: %v", err)
 	}
 
-	//make sure outputs arent empty
+	// make sure outputs arent empty
 	if len(certPEM) == 0 {
 		t.Fatal("certPEM is empty")
 	}
@@ -96,7 +99,7 @@ func TestIssueCertificate(t *testing.T) {
 		t.Errorf("expected SPIFFE ID %q, got %q", spiffeID, leafCert.URIs[0].String())
 	}
 
-	//check validity dates match ttl
+	// check validity dates match ttl
 	validFor := leafCert.NotAfter.Sub(leafCert.NotBefore)
 	if validFor < ttl-time.Second || validFor > ttl+time.Second {
 		t.Errorf("expected validity ~%v, got %v", ttl, validFor)
@@ -104,13 +107,13 @@ func TestIssueCertificate(t *testing.T) {
 }
 
 func TestIssueCertificate_DifferentIDs(t *testing.T) {
-	//issue first cert
+	// issue first cert
 	ca, err := NewCA()
 	if err != nil {
 		t.Fatalf("NewCA returned an error: %v", err)
 	}
 
-	spiffeID1 := "spiffe://example.test/ns/default/sa/my-agent"
+	spiffeID1 := testSpiffeID
 	ttl := 24 * time.Hour
 
 	certPEM1, _, err := ca.IssueCertificate(spiffeID1, ttl)
@@ -118,16 +121,16 @@ func TestIssueCertificate_DifferentIDs(t *testing.T) {
 		t.Fatalf("IssueCertificate returned error: %v", err)
 	}
 
-	//issue second cert
+	// issue second cert
 	spiffeID2 := "spiffe://example.test/ns/default/sa/my-agent2"
 
-	//issue certificate
+	// issue certificate
 	certPEM2, _, err := ca.IssueCertificate(spiffeID2, ttl)
 	if err != nil {
 		t.Fatalf("IssueCertificate returned error: %v", err)
 	}
 
-	//parse both certs
+	// parse both certs
 	leafCert1 := parseCertPEM(t, certPEM1)
 	leafCert2 := parseCertPEM(t, certPEM2)
 
@@ -144,7 +147,16 @@ func TestIssueCertificate_DifferentIDs(t *testing.T) {
 		t.Fatalf("cert2 public key is not ECDSA")
 	}
 
-	sameKey := pub1.X.Cmp(pub2.X) == 0 && pub1.Y.Cmp(pub2.Y) == 0
+	b1, err := pub1.Bytes()
+	if err != nil {
+		t.Fatalf("cert1 public key bytes: %v", err)
+	}
+	b2, err := pub2.Bytes()
+	if err != nil {
+		t.Fatalf("cert2 public key bytes: %v", err)
+	}
+	sameKey := bytes.Equal(b1, b2)
+
 	if sameKey {
 		t.Error("expected different key pairs, but public keys are identical")
 	}
@@ -155,29 +167,29 @@ func TestIssueCertificate_DifferentIDs(t *testing.T) {
 }
 
 func TestCertificateChainValidation(t *testing.T) {
-	//create CA
+	// create CA
 	ca, err := NewCA()
 	if err != nil {
 		t.Fatalf("NewCA returned an error: %v", err)
 	}
 
-	spiffeID := "spiffe://example.test/ns/default/sa/my-agent"
+	spiffeID := testSpiffeID
 	ttl := 24 * time.Hour
 
-	//issue certificate
+	// issue certificate
 	certPEM, _, err := ca.IssueCertificate(spiffeID, ttl)
 	if err != nil {
 		t.Fatalf("IssueCertificate returned error: %v", err)
 	}
 
-	//parse cert
+	// parse cert
 	leafCert := parseCertPEM(t, certPEM)
 
-	//create trust pool, add the CA
+	// create trust pool, add the CA
 	pool := x509.NewCertPool()
 	pool.AddCert(ca.Certificate)
 
-	//test chain validation
+	// test chain validation
 	_, err = leafCert.Verify(x509.VerifyOptions{
 		Roots: pool,
 	})

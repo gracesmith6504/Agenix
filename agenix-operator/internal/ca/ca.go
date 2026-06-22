@@ -10,9 +10,9 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
-	"crypto/x509/pkix" //for 'Subject:' in cert
+	"crypto/x509/pkix" // for 'Subject:' in cert
 
-	"math/big" //for serial number
+	"math/big" // for serial number
 	"net/url"  // for spiffe
 )
 
@@ -23,7 +23,7 @@ type CA struct {
 }
 
 func randomSerialNumber() (*big.Int, error) {
-	//generate a random serial number
+	// generate a random serial number
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	return rand.Int(rand.Reader, serialLimit)
 }
@@ -55,36 +55,36 @@ func EncodeKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
 }
 
 func NewCA() (*CA, error) {
-	//generate a random serial number
+	// generate a random serial number
 	serialNumber, err := randomSerialNumber()
 	if err != nil {
 		return nil, err
 	}
 
-	//set time to now
+	// set time to now
 	now := time.Now()
 
-	//certificate template
+	// certificate template
 	certTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			CommonName: "Agenix CA", //CN=Agenix CA
+			CommonName: "Agenix CA", // CN=Agenix CA
 		},
 		NotBefore:             now,
-		NotAfter:              now.AddDate(10, 0, 0), //10 years
+		NotAfter:              now.AddDate(10, 0, 0), // 10 years
 		IsCA:                  true,
-		BasicConstraintsValid: true, //suggested for inclusion by Cursor
+		BasicConstraintsValid: true, // suggested for inclusion by Cursor
 		KeyUsage:              x509.KeyUsageCertSign,
 	}
 
-	//generate ecdsa p-256 key pair
+	// generate ecdsa p-256 key pair
 	curve := elliptic.P256()
 	certPrivateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return nil, err
 	}
 
-	//create self-signed certificate
+	// create self-signed certificate
 	caBytes, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, &certPrivateKey.PublicKey, certPrivateKey)
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func NewCA() (*CA, error) {
 
 	certPem := EncodeCertPEM(caBytes)
 
-	//return CA struct
+	// return CA struct
 	return &CA{
 		PrivateKey:     certPrivateKey,
 		Certificate:    certificate,
@@ -105,14 +105,14 @@ func NewCA() (*CA, error) {
 	}, nil
 }
 
-func (ca *CA) IssueCertificate(spiffeID string, ttl time.Duration) (certPEM []byte, keyPEM []byte, err error) { //signs a new leaf certificate
-	//generate random serial number
+func (ca *CA) IssueCertificate(spiffeID string, ttl time.Duration) (certPEM []byte, keyPEM []byte, err error) { // signs a new leaf certificate
+	// generate random serial number
 	serialNumber, err := randomSerialNumber()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	//parse SpiffeID into url
+	// parse SpiffeID into url
 	if spiffeID == "" {
 		return nil, nil, errors.New("spiffeID cannot be empty")
 	}
@@ -121,10 +121,10 @@ func (ca *CA) IssueCertificate(spiffeID string, ttl time.Duration) (certPEM []by
 		return nil, nil, err
 	}
 
-	//set time to now
+	// set time to now
 	now := time.Now()
 
-	//leaf certificate template
+	// leaf certificate template
 	leafTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		URIs:         []*url.URL{parsed},
@@ -136,26 +136,26 @@ func (ca *CA) IssueCertificate(spiffeID string, ttl time.Duration) (certPEM []by
 		},
 	}
 
-	//generate a new ECDSA P-256 key pair for the leaf
+	// generate a new ECDSA P-256 key pair for the leaf
 	curve := elliptic.P256()
 	leafPrivateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	//create certificate
+	// create certificate
 	leafBytes, err := x509.CreateCertificate(rand.Reader, leafTemplate, ca.Certificate, &leafPrivateKey.PublicKey, ca.PrivateKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	//encode cert and key
+	// encode cert and key
 	certPem := EncodeCertPEM(leafBytes)
 	keyPem, err := EncodeKeyPEM(leafPrivateKey)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	//return cert and key as pem encoded bytes
+	// return cert and key as pem encoded bytes
 	return certPem, keyPem, nil
 }
