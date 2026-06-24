@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
+	"github.com/Bobbins228/Agenix/agenix-operator/internal/ca"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -154,6 +155,12 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
+	authority, err := ca.NewCA()
+	if err != nil {
+		setupLog.Error(err, "Failed to create CA")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
@@ -181,6 +188,7 @@ func main() {
 	if err := (&controller.AgentIdentityReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		CA:     authority,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentidentity")
 		os.Exit(1)

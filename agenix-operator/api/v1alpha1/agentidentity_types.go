@@ -65,7 +65,8 @@ type AgentIdentityStatus struct {
 	// agentID is the generated SPIFFE-style ID
 	AgentID string `json:"agentID,omitempty"`
 	// certificate holds details about the issued certificate
-	Certificate CertificateInfo `json:"certificate,omitempty"`
+	// +optional
+	Certificate *CertificateInfo `json:"certificate,omitempty"`
 	// +listType=map
 	// +listMapKey=type
 	// +optional
