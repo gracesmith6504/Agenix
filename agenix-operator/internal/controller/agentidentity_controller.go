@@ -40,7 +40,10 @@ import (
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/certutil"
 )
 
-const conditionCertificateReady = "CertificateReady"
+const (
+	conditionCertificateReady = "CertificateReady"
+	phaseError                = "Error"
+)
 
 // AgentIdentityReconciler reconciles a AgentIdentity object
 type AgentIdentityReconciler struct {
@@ -84,7 +87,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if err := r.Get(ctx, deploymentName, deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			identity.Status.Phase = "Error"
+			identity.Status.Phase = phaseError
 			meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 				Type:               "TargetFound",
 				Status:             metav1.ConditionFalse,
@@ -108,10 +111,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Message:            fmt.Sprintf("Deployment %q found", identity.Spec.TargetRef.Name),
 		LastTransitionTime: metav1.Now(),
 	})
-	if err := r.Status().Update(ctx, identity); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	log.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
 		deployment.Spec.Template.Spec.ServiceAccountName)
 
@@ -127,7 +126,18 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	)
 	if err != nil {
 		log.Error(err, "Failed to generate SPIFFE ID")
-		return ctrl.Result{}, err
+		identity.Status.Phase = phaseError
+		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
+			Type:               conditionCertificateReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             "InvalidSPIFFEID",
+			Message:            fmt.Sprintf("Failed to generate SPIFFE ID: %v", err),
+			LastTransitionTime: metav1.Now(),
+		})
+		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
 	}
 	log.Info("SPIFFE ID generated", "spiffeID", spiffeID)
 
@@ -141,7 +151,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if block != nil {
 			existingCert, parseErr := x509.ParseCertificate(block.Bytes)
 			if parseErr == nil && time.Now().Before(existingCert.NotAfter) {
-
 				log.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
 				fingerprint, fpErr := certutil.ComputeFingerprint(existingSecret.Data["tls.crt"])
 				if fpErr != nil {
@@ -166,7 +175,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					return ctrl.Result{}, err
 				}
 				return ctrl.Result{}, nil
-
 			}
 		}
 	} else if !apierrors.IsNotFound(err) {
@@ -176,7 +184,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	ttl, err := time.ParseDuration(identity.Spec.Identity.TTL)
 	if err != nil {
 		log.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
-		identity.Status.Phase = "Error"
+		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
 			Status:             metav1.ConditionFalse,
@@ -192,7 +200,18 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	bundle, err := certutil.GenerateAgentCertificate(r.CA, spiffeID, ttl)
 	if err != nil {
 		log.Error(err, "Failed to generate certificate")
-		return ctrl.Result{}, err
+		identity.Status.Phase = phaseError
+		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
+			Type:               conditionCertificateReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             "CertificateGenerationFailed",
+			Message:            fmt.Sprintf("Failed to generate certificate: %v", err),
+			LastTransitionTime: metav1.Now(),
+		})
+		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, nil
 	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -237,7 +256,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{}, nil
-
 }
 
 // SetupWithManager sets up the controller with the Manager.
