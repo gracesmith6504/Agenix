@@ -18,7 +18,10 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -29,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
@@ -124,6 +128,57 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 	log.Info("SPIFFE ID generated", "spiffeID", spiffeID)
+
+	existingSecret := &corev1.Secret{}
+	err = r.Get(ctx, types.NamespacedName{
+		Name:      identity.Name + "-tls",
+		Namespace: identity.Namespace,
+	}, existingSecret)
+	if err == nil {
+		block, _ := pem.Decode(existingSecret.Data["tls.crt"])
+		if block != nil {
+			existingCert, parseErr := x509.ParseCertificate(block.Bytes)
+			if parseErr == nil && time.Now().Before(existingCert.NotAfter) {
+				log.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
+				return ctrl.Result{}, nil
+			}
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	ttl, err := time.ParseDuration(identity.Spec.Identity.TTL)
+	if err != nil {
+		log.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
+		return ctrl.Result{}, err
+	}
+	bundle, err := certutil.GenerateAgentCertificate(r.CA, spiffeID, ttl)
+	if err != nil {
+		log.Error(err, "Failed to generate certificate")
+		return ctrl.Result{}, err
+	}
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      identity.Name + "-tls",
+			Namespace: identity.Namespace,
+		},
+	}
+
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		secret.Type = corev1.SecretTypeTLS
+		secret.Data = map[string][]byte{
+			"tls.crt": bundle.CertPEM,
+			"tls.key": bundle.KeyPEM,
+			"ca.crt":  bundle.CaCertPEM,
+		}
+		return controllerutil.SetControllerReference(identity, secret, r.Scheme)
+	})
+	if err != nil {
+		log.Error(err, "Failed to create or update Secret")
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Certificate Secret created", "secret", secret.Name)
 	return ctrl.Result{}, nil
 
 }
