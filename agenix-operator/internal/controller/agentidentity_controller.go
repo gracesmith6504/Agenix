@@ -33,6 +33,7 @@ import (
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/ca"
+	"github.com/Bobbins228/Agenix/agenix-operator/internal/certutil"
 )
 
 // AgentIdentityReconciler reconciles a AgentIdentity object
@@ -108,7 +109,23 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
 		deployment.Spec.Template.Spec.ServiceAccountName)
 
+	serviceAccount := deployment.Spec.Template.Spec.ServiceAccountName
+	if serviceAccount == "" {
+		serviceAccount = "default"
+	}
+
+	spiffeID, err := certutil.GenerateSPIFFEID(
+		identity.Spec.Identity.TrustDomain,
+		req.Namespace,
+		serviceAccount,
+	)
+	if err != nil {
+		log.Error(err, "Failed to generate SPIFFE ID")
+		return ctrl.Result{}, err
+	}
+	log.Info("SPIFFE ID generated", "spiffeID", spiffeID)
 	return ctrl.Result{}, nil
+
 }
 
 // SetupWithManager sets up the controller with the Manager.

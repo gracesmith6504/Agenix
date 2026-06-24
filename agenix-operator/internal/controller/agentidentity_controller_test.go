@@ -79,6 +79,10 @@ var _ = Describe("AgentIdentity Controller", func() {
 					TargetRef: agentv1alpha1.TargetRef{
 						Name: foundDeployment,
 					},
+					Identity: agentv1alpha1.IdentityConfig{
+						TrustDomain: "example.org",
+						TTL:         "24h",
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, identity)).To(Succeed())
