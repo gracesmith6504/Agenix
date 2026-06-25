@@ -128,7 +128,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Message:            fmt.Sprintf("Deployment %q found", identity.Spec.TargetRef.Name),
 		LastTransitionTime: metav1.Now(),
 	})
-	log.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
+	logger.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
 		deployment.Spec.Template.Spec.ServiceAccountName)
 
 	serviceAccount := deployment.Spec.Template.Spec.ServiceAccountName
@@ -142,7 +142,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		serviceAccount,
 	)
 	if err != nil {
-		log.Error(err, "Failed to generate SPIFFE ID")
+		logger.Error(err, "Failed to generate SPIFFE ID")
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -156,7 +156,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, nil
 	}
-	log.Info("SPIFFE ID generated", "spiffeID", spiffeID)
+	logger.Info("SPIFFE ID generated", "spiffeID", spiffeID)
 
 	existingSecret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{
@@ -168,7 +168,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if block != nil {
 			existingCert, parseErr := x509.ParseCertificate(block.Bytes)
 			if parseErr == nil && time.Now().Before(existingCert.NotAfter) {
-				log.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
+				logger.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
 				fingerprint, fpErr := certutil.ComputeFingerprint(existingSecret.Data["tls.crt"])
 				if fpErr != nil {
 					return ctrl.Result{}, fpErr
@@ -200,7 +200,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	ttl, err := time.ParseDuration(identity.Spec.Identity.TTL)
 	if err != nil {
-		log.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
+		logger.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -216,7 +216,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	bundle, err := certutil.GenerateAgentCertificate(r.CA, spiffeID, ttl)
 	if err != nil {
-		log.Error(err, "Failed to generate certificate")
+		logger.Error(err, "Failed to generate certificate")
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -247,11 +247,11 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return controllerutil.SetControllerReference(identity, secret, r.Scheme)
 	})
 	if err != nil {
-		log.Error(err, "Failed to create or update Secret")
+		logger.Error(err, "Failed to create or update Secret")
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Certificate Secret created", "secret", secret.Name)
+	logger.Info("Certificate Secret created", "secret", secret.Name)
 
 	identity.Status.Phase = "Provisioned"
 	identity.Status.AgentID = spiffeID
