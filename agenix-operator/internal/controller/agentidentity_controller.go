@@ -174,7 +174,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 				if err := r.Status().Update(ctx, identity); err != nil {
 					return ctrl.Result{}, err
 				}
-				return ctrl.Result{}, nil
+				return ctrl.Result{RequeueAfter: time.Until(existingCert.NotAfter) * 2 / 3}, nil
 			}
 		}
 	} else if !apierrors.IsNotFound(err) {
@@ -255,7 +255,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: ttl * 2 / 3}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
