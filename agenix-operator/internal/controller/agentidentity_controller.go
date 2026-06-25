@@ -33,7 +33,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/ca"
@@ -44,6 +44,8 @@ const (
 	conditionCertificateReady = "CertificateReady"
 	phaseError                = "Error"
 )
+
+const agentIdentityFinalizer string = "agenix.io/identity-cleanup"
 
 // AgentIdentityReconciler reconciles a AgentIdentity object
 type AgentIdentityReconciler struct {
@@ -68,15 +70,30 @@ type AgentIdentityReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
 	// Fetch the AgentIdentity CR
 	identity := &agentv1alpha1.AgentIdentity{}
 	if err := r.Get(ctx, req.NamespacedName, identity); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("AgentIdentity not found")
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// cheking whether the finalizer string already existss on CR
+	// and if it does not, we are adding it to the CR and updating the CR in the cluster
+	if !controllerutil.ContainsFinalizer(identity, agentIdentityFinalizer) {
+		controllerutil.AddFinalizer(identity, agentIdentityFinalizer)
+		if err := r.Update(ctx, identity); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	if !identity.DeletionTimestamp.IsZero() {
+		logger.Info("AgentIdentity is being deleted, handling cleanup")
+		return r.handleDeletion(ctx, identity)
 	}
 
 	// Check if the target Deployment exists
@@ -256,6 +273,34 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{RequeueAfter: ttl * 2 / 3}, nil
+}
+
+func (r *AgentIdentityReconciler) handleDeletion(ctx context.Context, ai *agentv1alpha1.AgentIdentity) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// deletting the tls secret
+	secretName, secret := ai.Name+"-tls", &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ai.Namespace}, secret)
+	if err == nil {
+		if err := r.Delete(ctx, secret); err != nil {
+			logger.Error(err, "Failed to delete TLS secret", "secret", secretName)
+			return ctrl.Result{}, err
+		}
+		logger.Info("Deleted TLS secret", "secret", secretName)
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	// if NotFound, owner reference or manual deletion already cleaned it up
+
+	// removing the finilizer
+	controllerutil.RemoveFinalizer(ai, agentIdentityFinalizer)
+	if err := r.Update(ctx, ai); err != nil {
+		logger.Error(err, "Failed to remove finalizer from AgentIdentity", "agentidentity", ai.Name)
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
