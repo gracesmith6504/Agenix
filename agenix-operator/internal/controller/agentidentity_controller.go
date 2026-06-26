@@ -33,7 +33,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/ca"
@@ -44,6 +44,8 @@ const (
 	conditionCertificateReady = "CertificateReady"
 	phaseError                = "Error"
 )
+
+const agentIdentityFinalizer string = "agenix.io/identity-cleanup"
 
 // AgentIdentityReconciler reconciles a AgentIdentity object
 type AgentIdentityReconciler struct {
@@ -68,15 +70,31 @@ type AgentIdentityReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
 	// Fetch the AgentIdentity CR
 	identity := &agentv1alpha1.AgentIdentity{}
 	if err := r.Get(ctx, req.NamespacedName, identity); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("AgentIdentity not found")
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// cheking whether the finalizer string already exists on CR
+	// and if it does not, we are adding it to the CR and updating the CR in the cluster
+	if !controllerutil.ContainsFinalizer(identity, agentIdentityFinalizer) {
+		controllerutil.AddFinalizer(identity, agentIdentityFinalizer)
+		if err := r.Update(ctx, identity); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if !identity.DeletionTimestamp.IsZero() {
+		logger.Info("AgentIdentity is being deleted, handling cleanup")
+		return r.handleDeletion(ctx, identity)
 	}
 
 	// Check if the target Deployment exists
@@ -111,7 +129,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Message:            fmt.Sprintf("Deployment %q found", identity.Spec.TargetRef.Name),
 		LastTransitionTime: metav1.Now(),
 	})
-	log.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
+	logger.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
 		deployment.Spec.Template.Spec.ServiceAccountName)
 
 	serviceAccount := deployment.Spec.Template.Spec.ServiceAccountName
@@ -125,7 +143,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		serviceAccount,
 	)
 	if err != nil {
-		log.Error(err, "Failed to generate SPIFFE ID")
+		logger.Error(err, "Failed to generate SPIFFE ID")
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -139,7 +157,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, nil
 	}
-	log.Info("SPIFFE ID generated", "spiffeID", spiffeID)
+	logger.Info("SPIFFE ID generated", "spiffeID", spiffeID)
 
 	existingSecret := &corev1.Secret{}
 	err = r.Get(ctx, types.NamespacedName{
@@ -151,7 +169,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		if block != nil {
 			existingCert, parseErr := x509.ParseCertificate(block.Bytes)
 			if parseErr == nil && time.Now().Before(existingCert.NotAfter) {
-				log.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
+				logger.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
 				fingerprint, fpErr := certutil.ComputeFingerprint(existingSecret.Data["tls.crt"])
 				if fpErr != nil {
 					return ctrl.Result{}, fpErr
@@ -183,7 +201,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	ttl, err := time.ParseDuration(identity.Spec.Identity.TTL)
 	if err != nil {
-		log.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
+		logger.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -199,7 +217,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	bundle, err := certutil.GenerateAgentCertificate(r.CA, spiffeID, ttl)
 	if err != nil {
-		log.Error(err, "Failed to generate certificate")
+		logger.Error(err, "Failed to generate certificate")
 		identity.Status.Phase = phaseError
 		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
 			Type:               conditionCertificateReady,
@@ -230,11 +248,11 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return controllerutil.SetControllerReference(identity, secret, r.Scheme)
 	})
 	if err != nil {
-		log.Error(err, "Failed to create or update Secret")
+		logger.Error(err, "Failed to create or update Secret")
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Certificate Secret created", "secret", secret.Name)
+	logger.Info("Certificate Secret created", "secret", secret.Name)
 
 	identity.Status.Phase = "Provisioned"
 	identity.Status.AgentID = spiffeID
@@ -256,6 +274,34 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	return ctrl.Result{RequeueAfter: ttl * 2 / 3}, nil
+}
+
+func (r *AgentIdentityReconciler) handleDeletion(ctx context.Context, ai *agentv1alpha1.AgentIdentity) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// deleting the tls secret
+	secretName, secret := ai.Name+"-tls", &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ai.Namespace}, secret)
+	if err == nil {
+		if err := r.Delete(ctx, secret); err != nil {
+			logger.Error(err, "Failed to delete TLS secret", "secret", secretName)
+			return ctrl.Result{}, err
+		}
+		logger.Info("Deleted TLS secret", "secret", secretName)
+	} else if !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+
+	// if NotFound, owner reference or manual deletion already cleaned it up
+
+	// removing the finalizer
+	controllerutil.RemoveFinalizer(ai, agentIdentityFinalizer)
+	if err := r.Update(ctx, ai); err != nil {
+		logger.Error(err, "Failed to remove finalizer from AgentIdentity", "agentidentity", ai.Name)
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
