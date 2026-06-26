@@ -74,7 +74,7 @@ func deploymentNameFromPod(pod *corev1.Pod) (string, bool) { // takes in decoded
 
 		suffix := "-" + hash // '-<hash>'
 
-		name, found := strings.CutSuffix(ref.Name, suffix) // deployment name = ReplicaSet name - '-<hash>'
+		name, _ := strings.CutSuffix(ref.Name, suffix) // deployment name = ReplicaSet name - '-<hash>'
 		if name != "" {
 			return name, true // name, name was found
 		}
