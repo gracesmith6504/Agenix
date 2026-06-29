@@ -571,7 +571,6 @@ var _ = Describe("AgentIdentity Controller", func() {
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, identity) })
 
 			authority, err := ca.NewCA()
-			Expect(err).NotTo(HaveOccurred())
 
 			reconciler := &AgentIdentityReconciler{
 				Client: k8sClient,
@@ -579,22 +578,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 				CA:     authority,
 			}
 
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      ownerName,
-					Namespace: resourceNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-
-			// Second reconcile: first one only adds finalizer and returns
-			_, err = reconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      ownerName,
-					Namespace: resourceNamespace,
-				},
-			})
-			reconcileUntilVerified(ctx, reconciler, "test-owner")
+			reconcileUntilVerified(ctx, reconciler, ownerName)
 			Expect(err).NotTo(HaveOccurred())
 
 			secret := &corev1.Secret{}

@@ -393,11 +393,11 @@ func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
 	expectedSPIFFEID string,
 	certInfo *agentv1alpha1.CertificateInfo,
 ) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
 	result, err := verify.ValidateIdentity(certPEM, caCertPEM, expectedSPIFFEID)
 	if err != nil {
-		log.Error(err, "Certificate verification failed")
+		logger.Error(err, "Certificate verification failed")
 		identity.Status.Phase = phaseError
 		identity.Status.AgentID = expectedSPIFFEID
 		identity.Status.Certificate = certInfo
@@ -412,7 +412,7 @@ func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
 			return ctrl.Result{}, statusErr
 		}
 		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
-			log.Error(labelErr, "Failed to remove verification labels")
+			logger.Error(labelErr, "Failed to remove verification labels")
 			return ctrl.Result{}, labelErr
 		}
 		return ctrl.Result{}, nil
@@ -433,7 +433,7 @@ func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
 			return ctrl.Result{}, statusErr
 		}
 		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
-			log.Error(labelErr, "Failed to remove verification labels")
+			logger.Error(labelErr, "Failed to remove verification labels")
 			return ctrl.Result{}, labelErr
 		}
 		return ctrl.Result{}, nil
@@ -461,7 +461,7 @@ func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
 			return ctrl.Result{}, statusErr
 		}
 		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
-			log.Error(labelErr, "Failed to remove verification labels")
+			logger.Error(labelErr, "Failed to remove verification labels")
 			return ctrl.Result{}, labelErr
 		}
 		return ctrl.Result{}, nil
@@ -482,7 +482,7 @@ func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
 	}
 
 	if err := r.applyVerificationLabels(ctx, identity, expectedSPIFFEID); err != nil {
-		log.Error(err, "Failed to apply verification labels")
+		logger.Error(err, "Failed to apply verification labels")
 		return ctrl.Result{}, err
 	} // apply the labels
 
