@@ -37,12 +37,20 @@ func (m *PodMutator) Handle(ctx context.Context, req admission.Request) admissio
 	}
 
 	// use deploymentName to find matching AgentIdentity, if exists
-	agentIdentity, found, err := m.findAgentIdentity(ctx, pod.Namespace, deploymentName)
+	agentIdentity, found, err := m.findAgentIdentity(ctx, req.Namespace, deploymentName)
 	if err != nil {
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	if !found {
 		return admission.Allowed("no matching AgentIdentity")
+	}
+
+	if agentIdentity.Status.AgentID == "" {
+		return admission.Allowed("AgentIdentity not yet reconciled")
+	}
+
+	if hasAgentIdentityVolume(pod) {
+		return admission.Allowed("agent-identity volume already present")
 	}
 
 	mutatePod(pod, agentIdentity)
@@ -97,6 +105,15 @@ func (m *PodMutator) findAgentIdentity(ctx context.Context, namespace, deploymen
 		}
 	}
 	return nil, false, nil // checked list, not found, nil error
+}
+
+func hasAgentIdentityVolume(pod *corev1.Pod) bool {
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == "agent-identity" {
+			return true
+		}
+	}
+	return false
 }
 
 func mutatePod(pod *corev1.Pod, ai *agentv1alpha1.AgentIdentity) {
