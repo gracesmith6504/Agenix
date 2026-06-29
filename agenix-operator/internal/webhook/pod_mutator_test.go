@@ -38,8 +38,10 @@ var _ = Describe("PodMutator", func() {
 		decoder = admission.NewDecoder(scheme)
 	})
 
+	const testNamespace = "default"
+
 	// Helper: creates a Pod owned by a Deployment (via ReplicaSet)
-	createPodWithOwner := func(namespace, deploymentName, hash string, containerCount int) *corev1.Pod {
+	createPodWithOwner := func(deploymentName, hash string, containerCount int) *corev1.Pod {
 		containers := make([]corev1.Container, containerCount)
 		for i := range containerCount {
 			containers[i] = corev1.Container{
@@ -52,7 +54,7 @@ var _ = Describe("PodMutator", func() {
 		return &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      deploymentName + "-pod-123",
-				Namespace: namespace,
+				Namespace: testNamespace,
 				Labels: map[string]string{
 					"pod-template-hash": hash, // used to get deployment name
 				},
@@ -87,11 +89,11 @@ var _ = Describe("PodMutator", func() {
 	}
 
 	// Helper: creates an AgentIdentity CR
-	createAgentIdentity := func(name, namespace, targetDeployment, agentID string) *agentv1alpha1.AgentIdentity {
+	createAgentIdentity := func(name, targetDeployment, agentID string) *agentv1alpha1.AgentIdentity {
 		return &agentv1alpha1.AgentIdentity{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: namespace,
+				Namespace: testNamespace,
 			},
 			Spec: agentv1alpha1.AgentIdentitySpec{
 				TargetRef: agentv1alpha1.TargetRef{
@@ -107,7 +109,7 @@ var _ = Describe("PodMutator", func() {
 	// TEST 1: Pod with matching AgentIdentity
 	It("should mutate pod with matching AgentIdentity", func() {
 		// Create an AgentIdentity that targets weather-agent deployment
-		ai := createAgentIdentity("test-identity", "default", "weather-agent",
+		ai := createAgentIdentity("test-identity", "weather-agent",
 			"spiffe://test.example.org/ns/default/sa/weather-agent")
 
 		// Create fake client
@@ -119,7 +121,7 @@ var _ = Describe("PodMutator", func() {
 		mutator = &PodMutator{Client: fakeClient, decoder: decoder}
 
 		// Create a pod owned by the weather-agent deployment
-		pod := createPodWithOwner("default", "weather-agent", "abc123", 1)
+		pod := createPodWithOwner("weather-agent", "abc123", 1)
 		req := createAdmissionRequest(pod)
 		resp := mutator.Handle(ctx, req)
 
@@ -159,13 +161,13 @@ var _ = Describe("PodMutator", func() {
 	// TEST 2: Pod without matching AgentIdentity
 	It("should allow pod without matching AgentIdentity", func() {
 		// Create an AgentIdentity for a different deployment
-		ai := createAgentIdentity("other-identity", "default", "other-deployment", "spiffe://test.example.org/other")
+		ai := createAgentIdentity("other-identity", "other-deployment", "spiffe://test.example.org/other")
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ai).Build()
 		mutator = &PodMutator{Client: fakeClient, decoder: decoder}
 
 		// Create pod that doesn't match any AgentIdentity
-		pod := createPodWithOwner("default", "weather-agent", "xyz789", 1)
+		pod := createPodWithOwner("weather-agent", "xyz789", 1)
 		req := createAdmissionRequest(pod)
 		resp := mutator.Handle(ctx, req)
 
@@ -175,11 +177,11 @@ var _ = Describe("PodMutator", func() {
 
 	// TEST 3: Correct mount paths - sanity check for exact path values
 	It("should use correct mount path and file paths", func() {
-		ai := createAgentIdentity("path-test", "default", "test-app", "spiffe://test/agent")
+		ai := createAgentIdentity("path-test", "test-app", "spiffe://test/agent")
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ai).Build()
 		mutator = &PodMutator{Client: fakeClient, decoder: decoder}
 
-		pod := createPodWithOwner("default", "test-app", "xyz", 1)
+		pod := createPodWithOwner("test-app", "xyz", 1)
 		expectedPod := pod.DeepCopy()
 		mutatePod(expectedPod, ai)
 
@@ -200,13 +202,13 @@ var _ = Describe("PodMutator", func() {
 
 	// TEST 4: Multiple containers
 	It("should mutate all containers in a multi-container pod", func() {
-		ai := createAgentIdentity("multi-identity", "default", "multi-app", "spiffe://test.example.org/multi")
+		ai := createAgentIdentity("multi-identity", "multi-app", "spiffe://test.example.org/multi")
 
 		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ai).Build()
 		mutator = &PodMutator{Client: fakeClient, decoder: decoder}
 
 		// Create a pod with 2 containers
-		pod := createPodWithOwner("default", "multi-app", "def456", 2)
+		pod := createPodWithOwner("multi-app", "def456", 2)
 		req := createAdmissionRequest(pod)
 		resp := mutator.Handle(ctx, req)
 
