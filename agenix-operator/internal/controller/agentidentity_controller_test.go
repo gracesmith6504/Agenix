@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -28,6 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
@@ -609,6 +612,8 @@ var _ = Describe("AgentIdentity Controller", func() {
 			finalizerRemovedDeploy = "finalizer-removed-deployment"
 			delNolabelID           = "del-nolabel-id"
 			delNolabelDeploy       = "del-nolabel-deploy"
+			delFailID              = "del-fail-id"
+			delFailDeploy          = "del-fail-deploy"
 		)
 
 		ctx := context.Background()
@@ -974,6 +979,53 @@ var _ = Describe("AgentIdentity Controller", func() {
 			// CR gone
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: delNolabelID, Namespace: resourceNamespace}, &agentv1alpha1.AgentIdentity{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		})
+
+		It("should retain finalizer when Deployment deletion fails", func() {
+			createDeployment(delFailDeploy)
+			identity := createFullIdentity(delFailID, delFailDeploy)
+			DeferCleanup(func() {
+				id := &agentv1alpha1.AgentIdentity{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: delFailID, Namespace: resourceNamespace}, id); err == nil {
+					id.Finalizers = nil
+					_ = k8sClient.Update(ctx, id)
+					_ = k8sClient.Delete(ctx, id)
+				}
+				_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: delFailDeploy, Namespace: resourceNamespace}})
+			})
+
+			reconciler := newReconciler()
+			reconcileUntilVerified(ctx, reconciler, delFailID)
+
+			// Create a failing reconciler: intercept Delete to fail on Deployments
+			failingClient := interceptor.NewClient(k8sClient, interceptor.Funcs{
+				Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+					if _, ok := obj.(*appsv1.Deployment); ok {
+						return fmt.Errorf("simulated delete failure")
+					}
+					return c.Delete(ctx, obj, opts...)
+				},
+			})
+			failReconciler := &AgentIdentityReconciler{
+				Client:   failingClient,
+				Scheme:   k8sClient.Scheme(),
+				CA:       reconciler.CA,
+				Recorder: events.NewFakeRecorder(10),
+			}
+
+			// Delete AgentIdentity
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: delFailID, Namespace: resourceNamespace}, identity)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, identity)).To(Succeed())
+
+			// Reconcile — should fail on Deployment deletion
+			_, err := failReconciler.Reconcile(ctx, reqFor(delFailID))
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("simulated delete failure"))
+
+			// Finalizer must still be present — CR not fully deleted
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: delFailID, Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Finalizers).To(ContainElement("agenix.io/identity-cleanup"))
 		})
 
 		It("should remove finalizer after successful cleanup", func() {
