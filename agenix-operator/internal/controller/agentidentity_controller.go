@@ -79,7 +79,8 @@ func SanitizeSPIFFEIDForLabel(spiffeID string) string {
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -116,9 +117,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if !identity.DeletionTimestamp.IsZero() {
 		logger.Info("AgentIdentity is being deleted, handling cleanup")
-		if err := r.removeVerificationLabels(ctx, identity); err != nil {
-			return ctrl.Result{}, err
-		} // remove the labels if the ai is deleted
 		return r.handleDeletion(ctx, identity)
 	}
 
@@ -353,22 +351,35 @@ func (r *AgentIdentityReconciler) reconcileExistingSecret(
 func (r *AgentIdentityReconciler) handleDeletion(ctx context.Context, ai *agentv1alpha1.AgentIdentity) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// deleting the tls secret
+	// 1. Delete TLS Secret
 	secretName, secret := ai.Name+"-tls", &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ai.Namespace}, secret)
 	if err == nil {
-		if err := r.Delete(ctx, secret); err != nil {
-			logger.Error(err, "Failed to delete TLS secret", "secret", secretName)
+		if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete TLS Secret", "secret", secretName)
+			r.Recorder.Event(ai, "Warning", "CleanupFailed", "Failed to delete TLS Secret: "+err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("Deleted TLS secret", "secret", secretName)
+		logger.Info("Deleted TLS Secret", "secret", secretName)
 	} else if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 
-	// if NotFound, owner reference or manual deletion already cleaned it up
+	// 2. Remove identity labels from Deployment
+	if err := r.removeVerificationLabels(ctx, ai); err != nil {
+		logger.Error(err, "Failed to remove verification labels")
+		r.Recorder.Event(ai, "Warning", "CleanupFailed", "Failed to remove identity labels: "+err.Error())
+		return ctrl.Result{}, err
+	}
 
-	// removing the finalizer
+	// 3. Delete target Deployment
+	if err := r.deleteTargetDeployment(ctx, ai); err != nil {
+		logger.Error(err, "Failed to delete target Deployment")
+		r.Recorder.Event(ai, "Warning", "CleanupFailed", "Failed to delete Deployment: "+err.Error())
+		return ctrl.Result{}, err
+	}
+
+	// 4. Remove finalizer only after all cleanup succeeds
 	controllerutil.RemoveFinalizer(ai, agentIdentityFinalizer)
 	if err := r.Update(ctx, ai); err != nil {
 		logger.Error(err, "Failed to remove finalizer from AgentIdentity", "agentidentity", ai.Name)
@@ -569,6 +580,29 @@ func (r *AgentIdentityReconciler) removeVerificationLabels(
 	}
 
 	return r.Update(ctx, deployment)
+}
+
+func (r *AgentIdentityReconciler) deleteTargetDeployment(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+) error {
+	logger := log.FromContext(ctx)
+	deployment := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      identity.Spec.TargetRef.Name,
+		Namespace: identity.Namespace,
+	}
+	if err := r.Get(ctx, key, deployment); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if err := r.Delete(ctx, deployment); err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	logger.Info("Deleted target Deployment", "deployment", key.Name)
+	return nil
 }
 
 // SetCondition upserts a condition and updates lastTransitionTime only when status changes.
