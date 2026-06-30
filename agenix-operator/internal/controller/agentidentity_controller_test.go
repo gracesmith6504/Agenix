@@ -598,6 +598,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 			resourceNamespace      = "default"
 			appLabel               = "app"
 			testApp                = "test"
+			testTrustDomain        = "example.org"
 			finalizerTestName      = "test-finalizer-add"
 			finalizerDeployment    = "finalizer-deployment"
 			deletionTestName       = "test-deletion-cleanup"
@@ -606,6 +607,8 @@ var _ = Describe("AgentIdentity Controller", func() {
 			alreadyGoneDeployment  = "already-gone-deployment"
 			finalizerRemovedName   = "test-finalizer-removed"
 			finalizerRemovedDeploy = "finalizer-removed-deployment"
+			delNolabelID           = "del-nolabel-id"
+			delNolabelDeploy       = "del-nolabel-deploy"
 		)
 
 		ctx := context.Background()
@@ -782,7 +785,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 				Spec: agentv1alpha1.AgentIdentitySpec{
 					TargetRef: agentv1alpha1.TargetRef{Name: deploymentName},
 					Identity: agentv1alpha1.IdentityConfig{
-						TrustDomain: "example.org",
+						TrustDomain: testTrustDomain,
 						TTL:         "24h",
 						AutoRotate:  true,
 					},
@@ -940,11 +943,11 @@ var _ = Describe("AgentIdentity Controller", func() {
 		})
 
 		It("should delete Deployment even without prior verification labels", func() {
-			createDeployment("del-nolabel-deploy")
-			createIdentity("del-nolabel-id", "del-nolabel-deploy")
+			createDeployment(delNolabelDeploy)
+			createIdentity(delNolabelID, delNolabelDeploy)
 			DeferCleanup(func() {
 				id := &agentv1alpha1.AgentIdentity{}
-				if err := k8sClient.Get(ctx, types.NamespacedName{Name: "del-nolabel-id", Namespace: resourceNamespace}, id); err == nil {
+				if err := k8sClient.Get(ctx, types.NamespacedName{Name: delNolabelID, Namespace: resourceNamespace}, id); err == nil {
 					id.Finalizers = nil
 					_ = k8sClient.Update(ctx, id)
 					_ = k8sClient.Delete(ctx, id)
@@ -953,23 +956,23 @@ var _ = Describe("AgentIdentity Controller", func() {
 
 			reconciler := newReconciler()
 			// Only add finalizer, don't reach verified (no TTL/TrustDomain on minimal identity)
-			_, err := reconciler.Reconcile(ctx, reqFor("del-nolabel-id"))
+			_, err := reconciler.Reconcile(ctx, reqFor(delNolabelID))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Delete AgentIdentity
 			identity := &agentv1alpha1.AgentIdentity{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "del-nolabel-id", Namespace: resourceNamespace}, identity)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: delNolabelID, Namespace: resourceNamespace}, identity)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, identity)).To(Succeed())
 
-			_, err = reconciler.Reconcile(ctx, reqFor("del-nolabel-id"))
+			_, err = reconciler.Reconcile(ctx, reqFor(delNolabelID))
 			Expect(err).NotTo(HaveOccurred())
 
 			// Deployment gone even though it never had labels
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "del-nolabel-deploy", Namespace: resourceNamespace}, &appsv1.Deployment{})
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: delNolabelDeploy, Namespace: resourceNamespace}, &appsv1.Deployment{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 
 			// CR gone
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "del-nolabel-id", Namespace: resourceNamespace}, &agentv1alpha1.AgentIdentity{})
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: delNolabelID, Namespace: resourceNamespace}, &agentv1alpha1.AgentIdentity{})
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 
@@ -1007,6 +1010,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 		const resourceNamespace = "default"
 		const testApp = "test"
 		const testLabelKey = "app"
+		const testTrustDomain = "example.org"
 
 		ctx := context.Background()
 
@@ -1046,7 +1050,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 				Spec: agentv1alpha1.AgentIdentitySpec{
 					TargetRef: agentv1alpha1.TargetRef{Name: deploymentName},
 					Identity: agentv1alpha1.IdentityConfig{
-						TrustDomain: "example.org",
+						TrustDomain: testTrustDomain,
 						TTL:         ttl,
 						AutoRotate:  false,
 					},
@@ -1175,7 +1179,7 @@ var _ = Describe("AgentIdentity Controller", func() {
 				Spec: agentv1alpha1.AgentIdentitySpec{
 					TargetRef: agentv1alpha1.TargetRef{Name: "badttl-deploy"},
 					Identity: agentv1alpha1.IdentityConfig{
-						TrustDomain: "example.org",
+						TrustDomain: testTrustDomain,
 						TTL:         "not-a-duration",
 					},
 				},
