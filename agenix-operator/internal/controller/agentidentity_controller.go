@@ -21,6 +21,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,11 +39,18 @@ import (
 	agentv1alpha1 "github.com/Bobbins228/Agenix/agenix-operator/api/v1alpha1"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/ca"
 	"github.com/Bobbins228/Agenix/agenix-operator/internal/certutil"
+	"github.com/Bobbins228/Agenix/agenix-operator/internal/verify"
 )
 
 const (
-	conditionCertificateReady = "CertificateReady"
 	phaseError                = "Error"
+	phaseExpired              = "Expired"
+	phaseVerified             = "Verified"
+	labelIdentityVerified     = "agenix.io/identity-verified"
+	labelAgentID              = "agenix.io/agent-id"
+	conditionCertificateReady = "CertificateReady"
+	conditionIdentityVerified = "IdentityVerified"
+	conditionTargetFound      = "TargetFound"
 )
 
 const agentIdentityFinalizer string = "agenix.io/identity-cleanup"
@@ -52,6 +60,18 @@ type AgentIdentityReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	CA     *ca.CA
+}
+
+// helper to sanitize spiffe id for use in labels (replace "://", "/", with "-")
+func SanitizeSPIFFEIDForLabel(spiffeID string) string {
+	s := strings.ReplaceAll(spiffeID, "://", "-")
+	s = strings.ReplaceAll(s, "/", "-")
+	if len(s) > 63 {
+		s = s[:63]
+		// trim trailing non-alphanumeric if truncation broke the rules
+		s = strings.TrimRight(s, "-_.")
+	}
+	return s
 }
 
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities,verbs=get;list;watch;create;update;patch;delete
@@ -82,7 +102,7 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	// cheking whether the finalizer string already exists on CR
+	// checking whether the finalizer string already exists on CR
 	// and if it does not, we are adding it to the CR and updating the CR in the cluster
 	if !controllerutil.ContainsFinalizer(identity, agentIdentityFinalizer) {
 		controllerutil.AddFinalizer(identity, agentIdentityFinalizer)
@@ -94,6 +114,9 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if !identity.DeletionTimestamp.IsZero() {
 		logger.Info("AgentIdentity is being deleted, handling cleanup")
+		if err := r.removeVerificationLabels(ctx, identity); err != nil {
+			return ctrl.Result{}, err
+		} // remove the labels if the ai is deleted
 		return r.handleDeletion(ctx, identity)
 	}
 
@@ -105,30 +128,25 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	if err := r.Get(ctx, deploymentName, deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			identity.Status.Phase = phaseError
-			meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-				Type:               "TargetFound",
-				Status:             metav1.ConditionFalse,
-				Reason:             "DeploymentNotFound",
-				Message:            fmt.Sprintf("Deployment %q not found in namespace %q", identity.Spec.TargetRef.Name, req.Namespace),
-				LastTransitionTime: metav1.Now(),
-			})
-			if err := r.Status().Update(ctx, identity); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
+			return r.reportPhaseError(
+				ctx,
+				identity,
+				conditionTargetFound,
+				"DeploymentNotFound",
+				fmt.Sprintf("Deployment %q not found in namespace %q", identity.Spec.TargetRef.Name, req.Namespace),
+			)
 		}
 		return ctrl.Result{}, err
 	}
 
 	identity.Status.Phase = "Pending"
-	meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-		Type:               "TargetFound",
-		Status:             metav1.ConditionTrue,
-		Reason:             "DeploymentFound",
-		Message:            fmt.Sprintf("Deployment %q found", identity.Spec.TargetRef.Name),
-		LastTransitionTime: metav1.Now(),
-	})
+	SetCondition(
+		&identity.Status.Conditions,
+		conditionTargetFound,
+		metav1.ConditionTrue,
+		"DeploymentFound",
+		fmt.Sprintf("Deployment %q found", identity.Spec.TargetRef.Name),
+	)
 	logger.Info("Target Deployment found", "deployment", identity.Spec.TargetRef.Name, "serviceAccount",
 		deployment.Spec.Template.Spec.ServiceAccountName)
 
@@ -144,18 +162,13 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	)
 	if err != nil {
 		logger.Error(err, "Failed to generate SPIFFE ID")
-		identity.Status.Phase = phaseError
-		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-			Type:               conditionCertificateReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             "InvalidSPIFFEID",
-			Message:            fmt.Sprintf("Failed to generate SPIFFE ID: %v", err),
-			LastTransitionTime: metav1.Now(),
-		})
-		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{}, nil
+		return r.reportPhaseError(
+			ctx,
+			identity,
+			conditionCertificateReady,
+			"InvalidSPIFFEID",
+			fmt.Sprintf("Failed to generate SPIFFE ID: %v", err),
+		)
 	}
 	logger.Info("SPIFFE ID generated", "spiffeID", spiffeID)
 
@@ -165,35 +178,8 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Namespace: identity.Namespace,
 	}, existingSecret)
 	if err == nil {
-		block, _ := pem.Decode(existingSecret.Data["tls.crt"])
-		if block != nil {
-			existingCert, parseErr := x509.ParseCertificate(block.Bytes)
-			if parseErr == nil && time.Now().Before(existingCert.NotAfter) {
-				logger.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
-				fingerprint, fpErr := certutil.ComputeFingerprint(existingSecret.Data["tls.crt"])
-				if fpErr != nil {
-					return ctrl.Result{}, fpErr
-				}
-				identity.Status.Phase = "Provisioned"
-				identity.Status.AgentID = spiffeID
-				identity.Status.Certificate = &agentv1alpha1.CertificateInfo{
-					SerialNumber: existingCert.SerialNumber.Text(16),
-					NotBefore:    metav1.NewTime(existingCert.NotBefore),
-					NotAfter:     metav1.NewTime(existingCert.NotAfter),
-					Fingerprint:  fingerprint,
-				}
-				meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-					Type:               conditionCertificateReady,
-					Status:             metav1.ConditionTrue,
-					Reason:             "CertificateIssued",
-					Message:            fmt.Sprintf("X.509 certificate issued and stored in Secret %s-tls", identity.Name),
-					LastTransitionTime: metav1.Now(),
-				})
-				if err := r.Status().Update(ctx, identity); err != nil {
-					return ctrl.Result{}, err
-				}
-				return ctrl.Result{RequeueAfter: time.Until(existingCert.NotAfter) * 2 / 3}, nil
-			}
+		if result, handled, handleErr := r.reconcileExistingSecret(ctx, identity, existingSecret, spiffeID); handled {
+			return result, handleErr
 		}
 	} else if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
@@ -202,34 +188,24 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	ttl, err := time.ParseDuration(identity.Spec.Identity.TTL)
 	if err != nil {
 		logger.Error(err, "Failed to parse TTL", "ttl", identity.Spec.Identity.TTL)
-		identity.Status.Phase = phaseError
-		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-			Type:               conditionCertificateReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             "InvalidTTL",
-			Message:            fmt.Sprintf("Failed to parse TTL %q: %v", identity.Spec.Identity.TTL, err),
-			LastTransitionTime: metav1.Now(),
-		})
-		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{}, nil
+		return r.reportPhaseError(
+			ctx,
+			identity,
+			conditionCertificateReady,
+			"InvalidTTL",
+			fmt.Sprintf("Failed to parse TTL %q: %v", identity.Spec.Identity.TTL, err),
+		)
 	}
 	bundle, err := certutil.GenerateAgentCertificate(r.CA, spiffeID, ttl)
 	if err != nil {
 		logger.Error(err, "Failed to generate certificate")
-		identity.Status.Phase = phaseError
-		meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-			Type:               conditionCertificateReady,
-			Status:             metav1.ConditionFalse,
-			Reason:             "CertificateGenerationFailed",
-			Message:            fmt.Sprintf("Failed to generate certificate: %v", err),
-			LastTransitionTime: metav1.Now(),
-		})
-		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
-			return ctrl.Result{}, statusErr
-		}
-		return ctrl.Result{}, nil
+		return r.reportPhaseError(
+			ctx,
+			identity,
+			conditionCertificateReady,
+			"CertificateGenerationFailed",
+			fmt.Sprintf("Failed to generate certificate: %v", err),
+		)
 	}
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -254,26 +230,122 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	logger.Info("Certificate Secret created", "secret", secret.Name)
 
-	identity.Status.Phase = "Provisioned"
-	identity.Status.AgentID = spiffeID
-	identity.Status.Certificate = &agentv1alpha1.CertificateInfo{
+	certInfo := &agentv1alpha1.CertificateInfo{
 		SerialNumber: bundle.SerialNumber,
 		NotBefore:    metav1.NewTime(bundle.NotBefore),
 		NotAfter:     metav1.NewTime(bundle.NotAfter),
 		Fingerprint:  bundle.Fingerprint,
 	}
-	meta.SetStatusCondition(&identity.Status.Conditions, metav1.Condition{
-		Type:               conditionCertificateReady,
-		Status:             metav1.ConditionTrue,
-		Reason:             "CertificateIssued",
-		Message:            fmt.Sprintf("X.509 certificate issued and stored in Secret %s-tls", identity.Name),
-		LastTransitionTime: metav1.Now(),
-	})
+
+	SetCondition(
+		&identity.Status.Conditions,
+		conditionCertificateReady,
+		metav1.ConditionTrue,
+		"CertificateIssued",
+		fmt.Sprintf("X.509 certificate issued and stored in Secret %s-tls", identity.Name),
+	)
+
+	return r.verifyAndUpdateStatus(
+		ctx,
+		identity,
+		secret.Data["tls.crt"],
+		secret.Data["ca.crt"],
+		spiffeID,
+		certInfo,
+	)
+}
+
+func (r *AgentIdentityReconciler) reportPhaseError(
+	// helper extracted by Cursor to fix lint issues
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+	conditionType, reason, message string,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	identity.Status.Phase = phaseError
+	SetCondition(
+		&identity.Status.Conditions,
+		conditionType,
+		metav1.ConditionFalse,
+		reason,
+		message,
+	)
 	if err := r.Status().Update(ctx, identity); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.removeVerificationLabels(ctx, identity); err != nil {
+		logger.Error(err, "Failed to remove verification labels")
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
 
-	return ctrl.Result{RequeueAfter: ttl * 2 / 3}, nil
+func (r *AgentIdentityReconciler) reconcileExistingSecret(
+	// helper extracted by Cursor to fix lint issues
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+	secret *corev1.Secret,
+	spiffeID string,
+) (ctrl.Result, bool, error) {
+	logger := log.FromContext(ctx)
+
+	block, _ := pem.Decode(secret.Data["tls.crt"])
+	if block == nil {
+		return ctrl.Result{}, false, nil
+	}
+
+	existingCert, parseErr := x509.ParseCertificate(block.Bytes)
+	if parseErr != nil {
+		return ctrl.Result{}, false, nil
+	}
+
+	fingerprint, fpErr := certutil.ComputeFingerprint(secret.Data["tls.crt"])
+	if fpErr != nil {
+		return ctrl.Result{}, true, fpErr
+	}
+
+	certInfo := &agentv1alpha1.CertificateInfo{
+		SerialNumber: existingCert.SerialNumber.Text(16),
+		NotBefore:    metav1.NewTime(existingCert.NotBefore),
+		NotAfter:     metav1.NewTime(existingCert.NotAfter),
+		Fingerprint:  fingerprint,
+	}
+
+	caCertPEM := secret.Data["ca.crt"]
+	if len(caCertPEM) == 0 {
+		logger.Error(nil, "Secret missing ca.crt", "secret", secret.Name)
+		identity.Status.AgentID = spiffeID
+		result, err := r.reportPhaseError(
+			ctx,
+			identity,
+			conditionCertificateReady,
+			"MissingCACertificate",
+			fmt.Sprintf("Secret %q is missing ca.crt", secret.Name),
+		)
+		return result, true, err
+	}
+
+	if time.Now().Before(existingCert.NotAfter) {
+		logger.Info("Certificate still valid, skipping regeneration", "notAfter", existingCert.NotAfter)
+		SetCondition(
+			&identity.Status.Conditions,
+			conditionCertificateReady,
+			metav1.ConditionTrue,
+			"CertificateIssued",
+			fmt.Sprintf("X.509 certificate stored in Secret %s-tls", identity.Name),
+		)
+		result, err := r.verifyAndUpdateStatus(ctx, identity, secret.Data["tls.crt"], caCertPEM, spiffeID, certInfo)
+		return result, true, err
+	}
+
+	if identity.Spec.Identity.AutoRotate {
+		logger.Info("Certificate expired, regenerating", "notAfter", existingCert.NotAfter)
+		return ctrl.Result{}, false, nil
+	}
+
+	logger.Info("Certificate expired, reporting expired status", "notAfter", existingCert.NotAfter)
+	result, err := r.verifyAndUpdateStatus(ctx, identity, secret.Data["tls.crt"], caCertPEM, spiffeID, certInfo)
+	return result, true, err
 }
 
 func (r *AgentIdentityReconciler) handleDeletion(ctx context.Context, ai *agentv1alpha1.AgentIdentity) (ctrl.Result, error) {
@@ -311,4 +383,204 @@ func (r *AgentIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Secret{}).
 		Named("agentidentity").
 		Complete(r)
+}
+
+// helper to check verification and update the status
+func (r *AgentIdentityReconciler) verifyAndUpdateStatus(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+	certPEM, caCertPEM []byte,
+	expectedSPIFFEID string,
+	certInfo *agentv1alpha1.CertificateInfo,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	result, err := verify.ValidateIdentity(certPEM, caCertPEM, expectedSPIFFEID)
+	if err != nil {
+		reason := "ChainValidationFailed"
+		if result != nil && result.ChainValid && !result.SPIFFEIDMatch {
+			reason = "SPIFFEIDMismatch"
+		}
+		if result == nil {
+			reason = "CertificateParseFailed"
+		}
+
+		logger.Error(err, "Certificate verification failed")
+		identity.Status.Phase = phaseError
+		identity.Status.AgentID = expectedSPIFFEID
+		identity.Status.Certificate = certInfo
+		SetCondition(
+			&identity.Status.Conditions,
+			conditionIdentityVerified,
+			metav1.ConditionFalse,
+			reason,
+			err.Error(),
+		)
+		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
+			logger.Error(labelErr, "Failed to remove verification labels")
+			return ctrl.Result{}, labelErr
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if result.IsExpired {
+		identity.Status.Phase = phaseExpired
+		identity.Status.AgentID = expectedSPIFFEID
+		identity.Status.Certificate = certInfo
+		SetCondition(
+			&identity.Status.Conditions,
+			conditionCertificateReady,
+			metav1.ConditionFalse,
+			"CertificateExpired",
+			fmt.Sprintf("Certificate expired at %s", result.ExpiresAt.Format(time.RFC3339)),
+		)
+		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
+			logger.Error(labelErr, "Failed to remove verification labels")
+			return ctrl.Result{}, labelErr
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if !result.ChainValid || !result.SPIFFEIDMatch {
+		reason := ""
+		if !result.ChainValid {
+			reason = "ChainValidationFailed"
+		}
+		if !result.SPIFFEIDMatch {
+			reason = "SPIFFEIDMismatch"
+		}
+		identity.Status.Phase = phaseError
+		identity.Status.AgentID = expectedSPIFFEID
+		identity.Status.Certificate = certInfo
+		SetCondition(
+			&identity.Status.Conditions,
+			conditionIdentityVerified,
+			metav1.ConditionFalse,
+			reason,
+			fmt.Sprintf("chainValid=%t spiffeIDMatch=%t", result.ChainValid, result.SPIFFEIDMatch),
+		)
+		if statusErr := r.Status().Update(ctx, identity); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		if labelErr := r.removeVerificationLabels(ctx, identity); labelErr != nil {
+			logger.Error(labelErr, "Failed to remove verification labels")
+			return ctrl.Result{}, labelErr
+		}
+		return ctrl.Result{}, nil
+	}
+
+	identity.Status.Phase = phaseVerified
+	identity.Status.AgentID = expectedSPIFFEID
+	identity.Status.Certificate = certInfo
+	SetCondition(
+		&identity.Status.Conditions,
+		conditionIdentityVerified,
+		metav1.ConditionTrue,
+		"SignatureValid",
+		fmt.Sprintf("Certificate chain and SPIFFE ID verified for %s", expectedSPIFFEID),
+	)
+	if err := r.Status().Update(ctx, identity); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.applyVerificationLabels(ctx, identity, expectedSPIFFEID); err != nil {
+		logger.Error(err, "Failed to apply verification labels")
+		return ctrl.Result{}, err
+	} // apply the labels
+
+	requeueAfter := time.Until(result.ExpiresAt) * 2 / 3
+	if requeueAfter <= 0 {
+		requeueAfter = time.Minute
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
+}
+
+// helper to add labels
+func (r *AgentIdentityReconciler) applyVerificationLabels(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+	spiffeID string,
+) error {
+	deployment := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      identity.Spec.TargetRef.Name,
+		Namespace: identity.Namespace,
+	}
+	if err := r.Get(ctx, key, deployment); err != nil {
+		return err
+	}
+
+	sanitized := SanitizeSPIFFEIDForLabel(spiffeID)
+	if deployment.Labels != nil &&
+		deployment.Labels[labelIdentityVerified] == "true" &&
+		deployment.Labels[labelAgentID] == sanitized {
+		return nil
+	}
+
+	if deployment.Labels == nil {
+		deployment.Labels = map[string]string{}
+	}
+	deployment.Labels[labelIdentityVerified] = "true"
+	deployment.Labels[labelAgentID] = sanitized
+
+	return r.Update(ctx, deployment)
+}
+
+// helper to remove labels
+func (r *AgentIdentityReconciler) removeVerificationLabels(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+) error {
+	deployment := &appsv1.Deployment{}
+	key := types.NamespacedName{
+		Name:      identity.Spec.TargetRef.Name,
+		Namespace: identity.Namespace,
+	}
+	if err := r.Get(ctx, key, deployment); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // deployment gone — nothing to clean
+		}
+		return err
+	}
+
+	if deployment.Labels == nil {
+		return nil
+	}
+
+	changed := false
+	if _, ok := deployment.Labels[labelIdentityVerified]; ok {
+		delete(deployment.Labels, labelIdentityVerified)
+		changed = true
+	}
+	if _, ok := deployment.Labels[labelAgentID]; ok {
+		delete(deployment.Labels, labelAgentID)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+
+	return r.Update(ctx, deployment)
+}
+
+// SetCondition upserts a condition and updates lastTransitionTime only when status changes.
+func SetCondition(
+	conditions *[]metav1.Condition,
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason, message string,
+) {
+	meta.SetStatusCondition(conditions, metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: metav1.Now(),
+	})
 }
