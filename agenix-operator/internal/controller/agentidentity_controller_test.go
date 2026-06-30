@@ -1002,6 +1002,224 @@ var _ = Describe("AgentIdentity Controller", func() {
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
+
+	Context("When reconciling with certificate edge cases", func() {
+		const resourceNamespace = "default"
+		const testApp = "test"
+		const testLabelKey = "app"
+
+		ctx := context.Background()
+
+		newReconciler := func() *AgentIdentityReconciler {
+			authority, err := ca.NewCA()
+			Expect(err).NotTo(HaveOccurred())
+			return &AgentIdentityReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				CA:       authority,
+				Recorder: record.NewFakeRecorder(10),
+			}
+		}
+
+		createDeployment := func(name string) {
+			dep := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace},
+				Spec: appsv1.DeploymentSpec{
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{testLabelKey: testApp},
+					},
+					Template: corev1.PodTemplateSpec{
+						ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{testLabelKey: testApp}},
+						Spec: corev1.PodSpec{
+							Containers: []corev1.Container{{Name: testApp, Image: "busybox"}},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, dep)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, dep) })
+		}
+
+		createIdentity := func(name, deploymentName, ttl string) *agentv1alpha1.AgentIdentity {
+			id := &agentv1alpha1.AgentIdentity{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace},
+				Spec: agentv1alpha1.AgentIdentitySpec{
+					TargetRef: agentv1alpha1.TargetRef{Name: deploymentName},
+					Identity: agentv1alpha1.IdentityConfig{
+						TrustDomain: "example.org",
+						TTL:         ttl,
+						AutoRotate:  false,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, id)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, id) })
+			return id
+		}
+
+		reqFor := func(name string) reconcile.Request {
+			return reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: name, Namespace: resourceNamespace},
+			}
+		}
+
+		It("should set Expired phase when certificate has expired and AutoRotate is false", func() {
+			createDeployment("expired-deploy")
+			createIdentity("expired-id", "expired-deploy", "1ns")
+
+			reconciler := newReconciler()
+
+			// Pass 1: finalizer
+			_, err := reconciler.Reconcile(ctx, reqFor("expired-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Pass 2: provision cert with 1ns TTL (will be expired immediately)
+			_, err = reconciler.Reconcile(ctx, reqFor("expired-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "expired-id", Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal("Expired"))
+
+			certReady := meta.FindStatusCondition(updated.Status.Conditions, conditionCertificateReady)
+			Expect(certReady).NotTo(BeNil())
+			Expect(certReady.Status).To(Equal(metav1.ConditionFalse))
+			Expect(certReady.Reason).To(Equal("CertificateExpired"))
+		})
+
+		It("should report Error phase when Secret is missing ca.crt on re-reconcile", func() {
+			createDeployment("noca-deploy")
+			createIdentity("noca-id", "noca-deploy", "24h")
+
+			reconciler := newReconciler()
+			reconcileUntilVerified(ctx, reconciler, "noca-id")
+
+			// Tamper with Secret: remove ca.crt
+			secret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "noca-id-tls", Namespace: resourceNamespace}, secret)).To(Succeed())
+			delete(secret.Data, "ca.crt")
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			// Re-reconcile — should detect missing ca.crt
+			_, err := reconciler.Reconcile(ctx, reqFor("noca-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "noca-id", Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal("Error"))
+
+			certReady := meta.FindStatusCondition(updated.Status.Conditions, conditionCertificateReady)
+			Expect(certReady).NotTo(BeNil())
+			Expect(certReady.Reason).To(Equal("MissingCACertificate"))
+		})
+
+		It("should regenerate cert when existing Secret has corrupted PEM", func() {
+			createDeployment("corrupt-deploy")
+			createIdentity("corrupt-id", "corrupt-deploy", "24h")
+
+			reconciler := newReconciler()
+			reconcileUntilVerified(ctx, reconciler, "corrupt-id")
+
+			// Tamper with Secret: corrupt tls.crt
+			secret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "corrupt-id-tls", Namespace: resourceNamespace}, secret)).To(Succeed())
+			secret.Data["tls.crt"] = []byte("not-valid-pem")
+			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+
+			// Re-reconcile — corrupted PEM triggers regeneration (falls through to new cert)
+			_, err := reconciler.Reconcile(ctx, reqFor("corrupt-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "corrupt-id", Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal("Verified"))
+		})
+
+		It("should set Error when SPIFFE ID components are invalid", func() {
+			createDeployment("badspiffe-deploy")
+			id := &agentv1alpha1.AgentIdentity{
+				ObjectMeta: metav1.ObjectMeta{Name: "badspiffe-id", Namespace: resourceNamespace},
+				Spec: agentv1alpha1.AgentIdentitySpec{
+					TargetRef: agentv1alpha1.TargetRef{Name: "badspiffe-deploy"},
+					Identity: agentv1alpha1.IdentityConfig{
+						TrustDomain: "",
+						TTL:         "24h",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, id)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, id) })
+
+			reconciler := newReconciler()
+			// Pass 1: finalizer
+			_, err := reconciler.Reconcile(ctx, reqFor("badspiffe-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			// Pass 2: should fail on empty trust domain
+			_, err = reconciler.Reconcile(ctx, reqFor("badspiffe-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "badspiffe-id", Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal("Error"))
+
+			certReady := meta.FindStatusCondition(updated.Status.Conditions, conditionCertificateReady)
+			Expect(certReady).NotTo(BeNil())
+			Expect(certReady.Reason).To(Equal("InvalidSPIFFEID"))
+		})
+
+		It("should set Error when TTL is invalid", func() {
+			createDeployment("badttl-deploy")
+			id := &agentv1alpha1.AgentIdentity{
+				ObjectMeta: metav1.ObjectMeta{Name: "badttl-id", Namespace: resourceNamespace},
+				Spec: agentv1alpha1.AgentIdentitySpec{
+					TargetRef: agentv1alpha1.TargetRef{Name: "badttl-deploy"},
+					Identity: agentv1alpha1.IdentityConfig{
+						TrustDomain: "example.org",
+						TTL:         "not-a-duration",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, id)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, id) })
+
+			reconciler := newReconciler()
+			_, err := reconciler.Reconcile(ctx, reqFor("badttl-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = reconciler.Reconcile(ctx, reqFor("badttl-id"))
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &agentv1alpha1.AgentIdentity{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "badttl-id", Namespace: resourceNamespace}, updated)).To(Succeed())
+			Expect(updated.Status.Phase).To(Equal("Error"))
+
+			certReady := meta.FindStatusCondition(updated.Status.Conditions, conditionCertificateReady)
+			Expect(certReady).NotTo(BeNil())
+			Expect(certReady.Reason).To(Equal("InvalidTTL"))
+		})
+	})
+
+	Context("SanitizeSPIFFEIDForLabel", func() {
+		It("should replace :// and / with -", func() {
+			result := SanitizeSPIFFEIDForLabel("spiffe://example.org/ns/default/sa/agent")
+			Expect(result).To(Equal("spiffe-example.org-ns-default-sa-agent"))
+		})
+
+		It("should truncate to 63 characters and trim trailing special chars", func() {
+			long := "spiffe://example.org/ns/very-long-namespace-name/sa/extremely-long-service-account-name-that-exceeds"
+			result := SanitizeSPIFFEIDForLabel(long)
+			Expect(len(result)).To(BeNumerically("<=", 63))
+			Expect(result).NotTo(HaveSuffix("-"))
+			Expect(result).NotTo(HaveSuffix("_"))
+			Expect(result).NotTo(HaveSuffix("."))
+		})
+
+		It("should handle short IDs without truncation", func() {
+			result := SanitizeSPIFFEIDForLabel("spiffe://a/b")
+			Expect(result).To(Equal("spiffe-a-b"))
+		})
+	})
 })
 
 const controllerTestNamespace = "default"
