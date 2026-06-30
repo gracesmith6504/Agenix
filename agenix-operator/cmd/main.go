@@ -190,9 +190,10 @@ func main() {
 	}
 
 	if err := (&controller.AgentIdentityReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		CA:     authority,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		CA:       authority,
+		Recorder: mgr.GetEventRecorder("agentidentity-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "agentidentity")
 		os.Exit(1)

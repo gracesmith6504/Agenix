@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -58,8 +59,9 @@ const agentIdentityFinalizer string = "agenix.io/identity-cleanup"
 // AgentIdentityReconciler reconciles a AgentIdentity object
 type AgentIdentityReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	CA     *ca.CA
+	Scheme   *runtime.Scheme
+	CA       *ca.CA
+	Recorder events.EventRecorder
 }
 
 // helper to sanitize spiffe id for use in labels (replace "://", "/", with "-")
@@ -77,7 +79,8 @@ func SanitizeSPIFFEIDForLabel(spiffeID string) string {
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=agent.agenix.io,resources=agentidentities/finalizers,verbs=update
-// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -114,9 +117,6 @@ func (r *AgentIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	if !identity.DeletionTimestamp.IsZero() {
 		logger.Info("AgentIdentity is being deleted, handling cleanup")
-		if err := r.removeVerificationLabels(ctx, identity); err != nil {
-			return ctrl.Result{}, err
-		} // remove the labels if the ai is deleted
 		return r.handleDeletion(ctx, identity)
 	}
 
@@ -351,22 +351,35 @@ func (r *AgentIdentityReconciler) reconcileExistingSecret(
 func (r *AgentIdentityReconciler) handleDeletion(ctx context.Context, ai *agentv1alpha1.AgentIdentity) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// deleting the tls secret
+	// 1. Delete TLS Secret
 	secretName, secret := ai.Name+"-tls", &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ai.Namespace}, secret)
 	if err == nil {
-		if err := r.Delete(ctx, secret); err != nil {
-			logger.Error(err, "Failed to delete TLS secret", "secret", secretName)
+		if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "Failed to delete TLS Secret", "secret", secretName)
+			r.Recorder.Eventf(ai, nil, "Warning", "CleanupFailed", "Cleanup", "Failed to delete TLS Secret: "+err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("Deleted TLS secret", "secret", secretName)
+		logger.Info("Deleted TLS Secret", "secret", secretName)
 	} else if !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
 
-	// if NotFound, owner reference or manual deletion already cleaned it up
+	// 2. Remove identity labels from Deployment
+	if err := r.removeVerificationLabels(ctx, ai); err != nil {
+		logger.Error(err, "Failed to remove verification labels")
+		r.Recorder.Eventf(ai, nil, "Warning", "CleanupFailed", "Cleanup", "Failed to remove identity labels: "+err.Error())
+		return ctrl.Result{}, err
+	}
 
-	// removing the finalizer
+	// 3. Delete target Deployment
+	if err := r.deleteTargetDeployment(ctx, ai); err != nil {
+		logger.Error(err, "Failed to delete target Deployment")
+		r.Recorder.Eventf(ai, nil, "Warning", "CleanupFailed", "Cleanup", "Failed to delete Deployment: "+err.Error())
+		return ctrl.Result{}, err
+	}
+
+	// 4. Remove finalizer only after all cleanup succeeds
 	controllerutil.RemoveFinalizer(ai, agentIdentityFinalizer)
 	if err := r.Update(ctx, ai); err != nil {
 		logger.Error(err, "Failed to remove finalizer from AgentIdentity", "agentidentity", ai.Name)
@@ -533,10 +546,10 @@ func (r *AgentIdentityReconciler) applyVerificationLabels(
 }
 
 // helper to remove labels
-func (r *AgentIdentityReconciler) removeVerificationLabels(
+func (r *AgentIdentityReconciler) getTargetDeployment(
 	ctx context.Context,
 	identity *agentv1alpha1.AgentIdentity,
-) error {
+) (*appsv1.Deployment, error) {
 	deployment := &appsv1.Deployment{}
 	key := types.NamespacedName{
 		Name:      identity.Spec.TargetRef.Name,
@@ -544,9 +557,23 @@ func (r *AgentIdentityReconciler) removeVerificationLabels(
 	}
 	if err := r.Get(ctx, key, deployment); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil // deployment gone — nothing to clean
+			return nil, nil
 		}
+		return nil, err
+	}
+	return deployment, nil
+}
+
+func (r *AgentIdentityReconciler) removeVerificationLabels(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+) error {
+	deployment, err := r.getTargetDeployment(ctx, identity)
+	if err != nil {
 		return err
+	}
+	if deployment == nil {
+		return nil
 	}
 
 	if deployment.Labels == nil {
@@ -567,6 +594,28 @@ func (r *AgentIdentityReconciler) removeVerificationLabels(
 	}
 
 	return r.Update(ctx, deployment)
+}
+
+func (r *AgentIdentityReconciler) deleteTargetDeployment(
+	ctx context.Context,
+	identity *agentv1alpha1.AgentIdentity,
+) error {
+	logger := log.FromContext(ctx)
+	deployment, err := r.getTargetDeployment(ctx, identity)
+	if err != nil {
+		return err
+	}
+	if deployment == nil {
+		return nil
+	}
+	if err := r.Delete(ctx, deployment); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	logger.Info("Deleted target Deployment", "deployment", deployment.Name)
+	return nil
 }
 
 // SetCondition upserts a condition and updates lastTransitionTime only when status changes.

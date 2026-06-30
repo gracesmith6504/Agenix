@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - secrets
   verbs:
   - create
@@ -47,6 +54,7 @@ rules:
   resources:
   - deployments
   verbs:
+  - delete
   - get
   - list
   - patch
