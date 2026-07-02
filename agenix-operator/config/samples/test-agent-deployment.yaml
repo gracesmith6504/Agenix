@@ -14,7 +14,17 @@ spec:
         app: weather-agent
     spec:
       serviceAccountName: weather-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: agent
-          image: busybox
+          image: registry.access.redhat.com/ubi9-minimal:latest
           command: ["sleep", "infinity"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
