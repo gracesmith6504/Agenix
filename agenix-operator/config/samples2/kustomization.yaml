@@ -1,0 +1,5 @@
+## Second sample agent (data-agent) for multi-agent demos ##
+resources:
+- data-agent-serviceaccount.yaml
+- data-agent-deployment.yaml
+- data-agent-identity.yaml
