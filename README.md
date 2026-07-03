@@ -63,15 +63,15 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 ---
 
-## Demo Videos
+## Demos & Slides
 
-<!-- TODO: Replace with your YouTube URLs after uploading -->
+<!-- TODO: Replace with your Google Drive share links -->
 
-| Demo | Link |
+| Resource | Link |
 |---|---|
-| Kind Cluster Demo | [YouTube](YOUR_KIND_DEMO_YOUTUBE_URL) |
-| OpenShift (ROSA) Demo | [YouTube](YOUR_OPENSHIFT_DEMO_YOUTUBE_URL) |
-| Full Demo Presentation | [Google Slides](YOUR_SLIDES_GOOGLE_DRIVE_URL) |
+| Kind Cluster Demo | [Watch](YOUR_KIND_DEMO_DRIVE_URL) |
+| OpenShift (ROSA) Demo | [Watch](YOUR_OPENSHIFT_DEMO_DRIVE_URL) |
+| Demo Presentation Slides | [View PDF](YOUR_SLIDES_DRIVE_URL) |
 
 ---
 
