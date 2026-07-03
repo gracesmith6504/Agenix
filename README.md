@@ -254,6 +254,27 @@ kubectl exec deploy/weather-agent -- printenv AGENIX_AGENT_ID
 >
 > When identity reaches `Verified`, the operator patches the Deployment pod template (`agenix.io/cert-fingerprint`) to roll out new pods; the webhook injects certs on pod create.
 
+## Team demo
+
+After the operator is deployed (quick start steps 1–4), run the automated demo script:
+
+```bash
+cd agenix-operator
+./scripts/demo.sh
+```
+
+Re-run from a clean state:
+
+```bash
+./scripts/demo.sh --reset
+```
+
+Remove sample resources only:
+
+```bash
+./scripts/demo.sh --cleanup
+```
+
 
 ## Deploy on OpenShift (Demo)
 

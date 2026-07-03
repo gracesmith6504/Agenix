@@ -31,16 +31,40 @@ make deploy IMG=$IMG         # Deploy controller + webhook + cert-manager resour
 
 ### Apply Samples
 
+Weather agent:
+
 ```bash
 kubectl apply -k config/samples/
-# wait for samples to be ready
 kubectl wait --for=jsonpath='{.status.phase}'=Verified agentidentity/weather-agent-identity --timeout=120s
 kubectl rollout status deployment/weather-agent --timeout=120s
+```
+
+Or run the full identity demo (operator must already be deployed):
+
+```bash
+./scripts/demo.sh          # apply, wait, verify
+./scripts/demo.sh --reset  # cleanup samples, then run demo again
+```
+
+Data agent (second agent for multi-agent demos):
+
+```bash
+kubectl apply -k config/samples2/
+kubectl wait --for=jsonpath='{.status.phase}'=Verified agentidentity/data-agent-identity --timeout=120s
+kubectl rollout status deployment/data-agent --timeout=120s
+```
+
+Both agents:
+
+```bash
+kubectl apply -k config/samples/
+kubectl apply -k config/samples2/
 ```
 
 ### Uninstall
 
 ```bash
+kubectl delete -k config/samples2/ --ignore-not-found
 kubectl delete -k config/samples/
 make undeploy
 make uninstall
