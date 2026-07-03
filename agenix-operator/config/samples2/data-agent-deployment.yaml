@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: weather-agent
+  name: data-agent
   namespace: default
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: weather-agent
+      app: data-agent
   template:
     metadata:
       labels:
-        app: weather-agent
+        app: data-agent
     spec:
-      serviceAccountName: weather-agent
+      serviceAccountName: data-agent
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
