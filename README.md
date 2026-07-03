@@ -6,6 +6,8 @@ Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
 **Grace Smith** — [GitHub](https://github.com/gracesmith6504)
 
+**[View the Demo Presentation & Slides](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing)** — architecture walkthrough, live demo recordings, and technical deep dives
+
 ---
 
 ## What is Agenix?
@@ -63,26 +65,17 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 ---
 
-## Demos & Slides
+## Demos, Walkthroughs & Deep Dives
 
-| Resource | Link |
+| Resource | What It Covers |
 |---|---|
-| Kind Cluster Demo | [Watch](https://drive.google.com/file/d/1qkV0247kzi15x1ZPyuKX2SMp98Eabryg/view?usp=drive_link) |
-| OpenShift (ROSA) Demo | [Watch](https://drive.google.com/file/d/15Spmyj1RzT_dq0Kgc-Fn5HHQbCdrvO13/view?usp=drive_link) |
-| Demo Presentation Slides | [View PDF](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing) |
-| Full Demo Recording | [Watch](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link) |
-
----
-
-## Technical Deep Dives
-
-I wrote detailed walkthroughs for each major task, documenting design decisions and what I learned:
-
-| Walkthrough | What It Covers |
-|---|---|
-| [Task 1: CRD Design](https://drive.google.com/file/d/1nydc-qVeaH3CI5O-fsYTxYFabdLthi2B/view?usp=drive_link) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, deep copy generation |
-| [Task 4a: Controller Scaffolding](https://drive.google.com/file/d/1ZeDsMl2FH5o1ueqjvBqVUhAYACon6KOv/view?usp=drive_link) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches |
-| [Task 4b: Certificate Provisioning](https://drive.google.com/file/d/1EILVZcwRd0m4iEfntr-kC6iv5172v1DD/view?usp=drive_link) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, integration testing with envtest |
+| [Demo Presentation Slides](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing) | Architecture, design decisions, reconcile loop flowchart, team reflections |
+| [Kind Cluster Demo](https://drive.google.com/file/d/1qkV0247kzi15x1ZPyuKX2SMp98Eabryg/view?usp=drive_link) | End-to-end operator demo on local Kind cluster |
+| [OpenShift (ROSA) Demo](https://drive.google.com/file/d/15Spmyj1RzT_dq0Kgc-Fn5HHQbCdrvO13/view?usp=drive_link) | Operator running on production-like ROSA HCP cluster |
+| [Full Demo Recording](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link) | Complete team presentation with live demo |
+| [Task 1: CRD Design Walkthrough](https://drive.google.com/file/d/1nydc-qVeaH3CI5O-fsYTxYFabdLthi2B/view?usp=drive_link) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, deep copy generation |
+| [Task 4a: Controller Scaffolding Walkthrough](https://drive.google.com/file/d/1ZeDsMl2FH5o1ueqjvBqVUhAYACon6KOv/view?usp=drive_link) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches |
+| [Task 4b: Certificate Provisioning Walkthrough](https://drive.google.com/file/d/1EILVZcwRd0m4iEfntr-kC6iv5172v1DD/view?usp=drive_link) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, integration testing with envtest |
 | [OpenShift Deployment Guide](https://drive.google.com/file/d/18v2-GVL9Nn0o7dcLWYSMxJozBzVoi1om/view?usp=drive_link) | Cross-arch builds, SCC compliance, ROSA HCP deployment, validation steps |
 | [Learning Exercises](https://drive.google.com/file/d/1G5gEpDMvML3V0Hnw-SGQ4xkUskOrhDAq/view?usp=drive_link) | 15 pages of intentional breakage experiments across all tasks — CRDs, certs, webhooks, finalizers |
 
