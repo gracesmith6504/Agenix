@@ -6,7 +6,7 @@ Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
 **Grace Smith** | [GitHub](https://github.com/gracesmith6504)
 
-**[View the Demo Presentation & Slides](https://drive.google.com/file/d/1BHK0ErwhbIQ-At-H6xUfwLBlIF3jxANw/view?usp=drive_link)**: architecture walkthrough, live demo recordings, and technical deep dives
+**[Watch the Demo Presentation](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link)**: architecture walkthrough, live demo, and team presentation
 
 ---
 
