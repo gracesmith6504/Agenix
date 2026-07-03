@@ -6,7 +6,7 @@ Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
 **Grace Smith** | [GitHub](https://github.com/gracesmith6504)
 
-**[View the Demo Presentation & Slides](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing)**: architecture walkthrough, live demo recordings, and technical deep dives
+**[View the Demo Presentation & Slides](https://drive.google.com/file/d/1BHK0ErwhbIQ-At-H6xUfwLBlIF3jxANw/view?usp=drive_link)**: architecture walkthrough, live demo recordings, and technical deep dives
 
 ---
 
@@ -69,7 +69,7 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 | Resource | What It Covers |
 |---|---|
-| [Demo Presentation Slides](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing) | Architecture, design decisions, reconcile loop flowchart, team reflections |
+| [Demo Presentation Slides](https://drive.google.com/file/d/1BHK0ErwhbIQ-At-H6xUfwLBlIF3jxANw/view?usp=drive_link) | Architecture, design decisions, reconcile loop flowchart, team reflections |
 | [Kind Cluster Demo](https://drive.google.com/file/d/1qkV0247kzi15x1ZPyuKX2SMp98Eabryg/view?usp=drive_link) | End-to-end operator demo on local Kind cluster |
 | [OpenShift (ROSA) Demo](https://drive.google.com/file/d/15Spmyj1RzT_dq0Kgc-Fn5HHQbCdrvO13/view?usp=drive_link) | Operator running on production-like ROSA HCP cluster |
 | [Full Demo Recording](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link) | Complete team presentation with live demo |
