@@ -77,16 +77,17 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 ## Technical Deep Dives
 
-I wrote detailed walkthroughs for each major task, documenting design decisions, bugs I found, and what I learned:
+I wrote detailed walkthroughs for each major task, documenting design decisions and what I learned:
 
 <!-- TODO: Replace with your Google Drive share links -->
 
 | Walkthrough | What It Covers |
 |---|---|
-| [Task 1: CRD Design](YOUR_TASK1_WALKTHROUGH_DRIVE_URL) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, 4 bugs found and fixed |
-| [Task 4a: Controller Scaffolding](YOUR_TASK4A_WALKTHROUGH_DRIVE_URL) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches, 3 bugs |
-| [Task 4b: Certificate Provisioning](YOUR_TASK4B_WALKTHROUGH_DRIVE_URL) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, 5 integration tests, 6 bugs |
+| [Task 1: CRD Design](YOUR_TASK1_WALKTHROUGH_DRIVE_URL) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, deep copy generation |
+| [Task 4a: Controller Scaffolding](YOUR_TASK4A_WALKTHROUGH_DRIVE_URL) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches |
+| [Task 4b: Certificate Provisioning](YOUR_TASK4B_WALKTHROUGH_DRIVE_URL) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, integration testing with envtest |
 | [OpenShift Deployment Guide](YOUR_DEPLOYMENT_GUIDE_DRIVE_URL) | Cross-arch builds, SCC compliance, ROSA HCP deployment, validation steps |
+| [Learning Exercises](YOUR_LEARNING_EXERCISES_DRIVE_URL) | 15 pages of intentional breakage experiments across all tasks — CRDs, certs, webhooks, finalizers |
 
 ---
 
@@ -105,6 +106,19 @@ Beyond the code, I intentionally broke things to understand how they work. Highl
 ## Technologies
 
 Go, Kubernetes, Kubebuilder, controller-runtime, X.509 / SPIFFE, ECDSA P-256, Ginkgo / Gomega, envtest, GitHub Actions, OpenShift / ROSA HCP, Kustomize, Podman, cert-manager
+
+---
+
+## How I Worked
+
+All contributions followed the [Kagenti project's contributing guidelines](https://github.com/kagenti/kagenti/blob/main/CONTRIBUTING.md) and [development guide](https://github.com/kagenti/kagenti/blob/main/docs/dev-guide.md):
+
+- **Fork-and-branch workflow** — worked from a personal fork, rebased from upstream before each PR
+- **DCO sign-off** on every commit (Developer Certificate of Origin)
+- **Conventional commits** — prefixed with `feat:`, `fix:`, `docs:`, `test:` for clear git history
+- **Pre-commit linting** — ran `make lint` before every push
+- **PR descriptions** included problem context, solution explanation, and how testing was performed
+- **Code review** — reviewed teammates' PRs and responded to review feedback on my own
 
 ---
 
