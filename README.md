@@ -33,7 +33,7 @@ I built the CRD, controller, and certificate provisioning pipeline: the core rec
 | [#13](https://github.com/Bobbins228/Agenix/pull/13) | **OpenShift Security Context** fix | +11 | `restricted-v2` SCC compliance, `runAsNonRoot`, `seccompProfile`, `ubi9-minimal` |
 | — | **OpenShift Deployment & Validation** | — | Cross-arch build (ARM→AMD64), `quay.io` registry, ROSA HCP cluster, wrote [deployment guide](https://drive.google.com/file/d/18v2-GVL9Nn0o7dcLWYSMxJozBzVoi1om/view?usp=drive_link) |
 
-**Also:** Reviewed teammate's [PR #3](https://github.com/Bobbins228/Agenix/pull/3), where I identified a SPIFFE ID validation bug before merge.
+**Also:** Reviewed all 8 teammate PRs ([#3](https://github.com/Bobbins228/Agenix/pull/3), [#4](https://github.com/Bobbins228/Agenix/pull/4), [#7](https://github.com/Bobbins228/Agenix/pull/7), [#8](https://github.com/Bobbins228/Agenix/pull/8), [#9](https://github.com/Bobbins228/Agenix/pull/9), [#10](https://github.com/Bobbins228/Agenix/pull/10), [#11](https://github.com/Bobbins228/Agenix/pull/11), [#12](https://github.com/Bobbins228/Agenix/pull/12)). Found a SPIFFE ID validation gap on [#3](https://github.com/Bobbins228/Agenix/pull/3) and a path injection risk in SPIFFE ID generation on [#4](https://github.com/Bobbins228/Agenix/pull/4).
 
 **Total: ~4,660 lines of Go across 5 merged PRs**, plus OpenShift deployment work and code review.
 
