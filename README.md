@@ -65,13 +65,12 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 ## Demos & Slides
 
-<!-- TODO: Replace with your Google Drive share links -->
-
 | Resource | Link |
 |---|---|
-| Kind Cluster Demo | [Watch](YOUR_KIND_DEMO_DRIVE_URL) |
-| OpenShift (ROSA) Demo | [Watch](YOUR_OPENSHIFT_DEMO_DRIVE_URL) |
-| Demo Presentation Slides | [View PDF](YOUR_SLIDES_DRIVE_URL) |
+| Kind Cluster Demo | [Watch](https://drive.google.com/file/d/1qkV0247kzi15x1ZPyuKX2SMp98Eabryg/view?usp=drive_link) |
+| OpenShift (ROSA) Demo | [Watch](https://drive.google.com/file/d/15Spmyj1RzT_dq0Kgc-Fn5HHQbCdrvO13/view?usp=drive_link) |
+| Demo Presentation Slides | [View PDF](https://drive.google.com/drive/folders/1SewMkJJzBbne8LGlvamBNs2hVC87C3i6?usp=sharing) |
+| Full Demo Recording | [Watch](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link) |
 
 ---
 
@@ -79,15 +78,13 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 I wrote detailed walkthroughs for each major task, documenting design decisions and what I learned:
 
-<!-- TODO: Replace with your Google Drive share links -->
-
 | Walkthrough | What It Covers |
 |---|---|
-| [Task 1: CRD Design](YOUR_TASK1_WALKTHROUGH_DRIVE_URL) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, deep copy generation |
-| [Task 4a: Controller Scaffolding](YOUR_TASK4A_WALKTHROUGH_DRIVE_URL) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches |
-| [Task 4b: Certificate Provisioning](YOUR_TASK4B_WALKTHROUGH_DRIVE_URL) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, integration testing with envtest |
-| [OpenShift Deployment Guide](YOUR_DEPLOYMENT_GUIDE_DRIVE_URL) | Cross-arch builds, SCC compliance, ROSA HCP deployment, validation steps |
-| [Learning Exercises](YOUR_LEARNING_EXERCISES_DRIVE_URL) | 15 pages of intentional breakage experiments across all tasks — CRDs, certs, webhooks, finalizers |
+| [Task 1: CRD Design](https://drive.google.com/file/d/1nydc-qVeaH3CI5O-fsYTxYFabdLthi2B/view?usp=drive_link) | Kubebuilder scaffolding, OpenAPI schema, composition vs inheritance, deep copy generation |
+| [Task 4a: Controller Scaffolding](https://drive.google.com/file/d/1ZeDsMl2FH5o1ueqjvBqVUhAYACon6KOv/view?usp=drive_link) | Reconciliation loop, CA initialization, RBAC markers, `For()`/`Owns()` watches |
+| [Task 4b: Certificate Provisioning](https://drive.google.com/file/d/1EILVZcwRd0m4iEfntr-kC6iv5172v1DD/view?usp=drive_link) | X.509 generation, SPIFFE IDs, `CreateOrUpdate`, owner refs, integration testing with envtest |
+| [OpenShift Deployment Guide](https://drive.google.com/file/d/18v2-GVL9Nn0o7dcLWYSMxJozBzVoi1om/view?usp=drive_link) | Cross-arch builds, SCC compliance, ROSA HCP deployment, validation steps |
+| [Learning Exercises](https://drive.google.com/file/d/1G5gEpDMvML3V0Hnw-SGQ4xkUskOrhDAq/view?usp=drive_link) | 15 pages of intentional breakage experiments across all tasks — CRDs, certs, webhooks, finalizers |
 
 ---
 
