@@ -31,7 +31,7 @@ I built the CRD, controller, and certificate provisioning pipeline: the core rec
 | [#5](https://github.com/Bobbins228/Agenix/pull/5) | **Controller Scaffolding** — CA init, RBAC, watches | +221 | Reconciliation loop, `For()`/`Owns()` watches, RBAC markers, status subresource |
 | [#6](https://github.com/Bobbins228/Agenix/pull/6) | **Certificate Provisioning** in reconcile loop | +426 | X.509/ECDSA P-256, SPIFFE IDs, `CreateOrUpdate`, owner references, `RequeueAfter` at 2/3 TTL |
 | [#13](https://github.com/Bobbins228/Agenix/pull/13) | **OpenShift Security Context** fix | +11 | `restricted-v2` SCC compliance, `runAsNonRoot`, `seccompProfile`, `ubi9-minimal` |
-| — | **OpenShift Deployment & Validation** | — | Cross-arch build (ARM→AMD64), `quay.io` registry, ROSA HCP cluster, wrote [deployment guide](#openshift-deployment-guide) |
+| — | **OpenShift Deployment & Validation** | — | Cross-arch build (ARM→AMD64), `quay.io` registry, ROSA HCP cluster, wrote [deployment guide](https://drive.google.com/file/d/18v2-GVL9Nn0o7dcLWYSMxJozBzVoi1om/view?usp=drive_link) |
 
 **Also:** Reviewed teammate's [PR #3](https://github.com/Bobbins228/Agenix/pull/3), where I identified a SPIFFE ID validation bug before merge.
 
