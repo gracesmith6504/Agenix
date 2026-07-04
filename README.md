@@ -12,9 +12,9 @@ Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
 ## What is Agenix?
 
-In AI agent-to-agent systems, every workload needs a verifiable identity, but managing certificates manually doesn't scale. Agenix is a Kubernetes operator that solves this: you deploy an agent and create one custom resource, and the operator handles X.509 certificate issuance, SPIFFE ID generation, pod injection via webhook, rotation, and cleanup automatically.
+In AI agent-to-agent systems, every workload needs a verifiable identity, but managing certificates manually doesn't scale. Agenix is a Kubernetes operator that handles this: you create one custom resource pointing at a Deployment, and the operator issues X.509 certificates, generates SPIFFE IDs, injects credentials into pods via a webhook, rotates certs, and cleans up on deletion.
 
-The design uses composition over inheritance. The CRD references a target Deployment by name rather than embedding its spec, keeping identity concerns decoupled from workload configuration. Agenix is a simplified, educational take on production patterns from Red Hat's [Kagenti Operator](https://github.com/kagenti/kagenti).
+The design uses composition over inheritance. The CRD references a target Deployment by name rather than embedding its spec, so the identity layer stays separate from workload config. Agenix is a simplified, educational take on production patterns from Red Hat's [Kagenti Operator](https://github.com/kagenti/kagenti).
 
 > **This is my fork.** The upstream repo is [Bobbins228/Agenix](https://github.com/Bobbins228/Agenix). All PRs linked below were merged into upstream. I'm using this fork to showcase my contributions.
 
@@ -61,7 +61,7 @@ The operator follows the standard Kubernetes controller pattern:
 
 ![Reconcile Loop](docs/images/reconcile-loop.png)
 
-Each step has error handling with descriptive status conditions. Certificate rotation requeues automatically at 2/3 of the TTL, so a 24-hour cert requeues after 16 hours. The controller uses `controllerutil.CreateOrUpdate` for idempotent Secret management, meaning it converges safely even if restarted mid-reconcile.
+Each step sets a status condition on failure. Certificate rotation requeues at 2/3 of the TTL, so a 24-hour cert requeues after 16 hours. The controller uses `controllerutil.CreateOrUpdate` for idempotent Secret management, so it converges correctly even if restarted mid-reconcile.
 
 ---
 
@@ -83,7 +83,7 @@ Each step has error handling with descriptive status conditions. Certificate rot
 
 ## What I Learned
 
-Beyond the code, I intentionally broke things to understand how they work. Highlights from 15 pages of learning exercises across all tasks:
+I intentionally broke things to understand how they work. From 15 pages of learning exercises:
 
 - **Deleting a CRD cascades to ALL custom resources of that type.** They cannot be recovered. The CRD is the definition; without it, Kubernetes can't keep any instances.
 - **Chain validation fails when a leaf cert is self-signed.** The CA proves the identity is legitimate. Without chain validation, any agent could forge its own identity.
@@ -105,15 +105,15 @@ All contributions followed the [Kagenti project's contributing guidelines](https
 
 - **Fork-and-branch workflow.** Worked from a personal fork, merged from upstream before each PR
 - **DCO sign-off** on every commit (Developer Certificate of Origin)
-- **Conventional commits** prefixed with `feat:`, `fix:`, `docs:`, `test:` for clear git history
+- **Conventional commits** prefixed with `feat:`, `fix:`, `docs:`, `test:`
 - **Pre-commit linting.** Ran `make lint` before every push
-- **PR descriptions** included problem context, solution explanation, and how testing was performed
+- **PR descriptions** included problem context, solution explanation, and testing steps
 - **Code review.** Reviewed teammates' PRs and responded to review feedback on my own
 
 ---
 
 ## About the Project
 
-Agenix was built as a team intern project at Red Hat by three interns on the AI Agent Ops team. The upstream repo is [Bobbins228/Agenix](https://github.com/Bobbins228/Agenix). I built the CRD, controller, and certificate provisioning (Tasks 1, 4a, 4b), plus OpenShift deployment. Other team members built the CA, webhook, verification, SPIFFE utilities, and finalizer/lifecycle management.
+Agenix was built by three interns on Red Hat's AI Agent Ops team. The upstream repo is [Bobbins228/Agenix](https://github.com/Bobbins228/Agenix). I built the CRD, controller, and certificate provisioning (Tasks 1, 4a, 4b), plus OpenShift deployment. Other team members built the CA, webhook, verification, SPIFFE utilities, and finalizer/lifecycle management.
 
 For the full project README (setup instructions, API reference, architecture details), see the [upstream repo](https://github.com/Bobbins228/Agenix).
