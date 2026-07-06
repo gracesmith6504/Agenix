@@ -14,7 +14,7 @@ Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
 In AI agent-to-agent systems, every workload needs a verifiable identity, but managing certificates manually doesn't scale. Agenix is a Kubernetes operator that handles this: you create one custom resource pointing at a Deployment, and the operator issues X.509 certificates, generates SPIFFE IDs, injects credentials into pods via a webhook, rotates certs, and cleans up on deletion.
 
-The design uses composition over inheritance. The CRD references a target Deployment by name rather than embedding its spec, so the identity layer stays separate from workload config. Agenix is a simplified, educational take on production patterns from the [Kagenti Operator](https://github.com/kagenti/kagenti).
+The design uses composition over inheritance. The CRD references a target Deployment by name rather than embedding its spec, so the identity layer stays separate from workload config. Agenix is a simplified, educational take on production patterns from the [Kagenti Operator](https://github.com/kagenti/kagenti), an IBM Research project with Red Hat contributors.
 
 > **This is my fork.** The upstream repo is [Bobbins228/Agenix](https://github.com/Bobbins228/Agenix). All PRs linked below were merged into upstream. I'm using this fork to showcase my contributions.
 
