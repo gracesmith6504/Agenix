@@ -4,7 +4,7 @@
 
 Built at **Red Hat** | AI Agent Ops Team | Summer 2026
 
-**Grace Smith** | [GitHub](https://github.com/gracesmith6504)
+**Grace Smith** | [GitHub](https://github.com/gracesmith6504) | [Blog Post](https://medium.com/@gracesmith6504/what-i-learnt-building-a-kubernetes-operator-as-an-intern-455e097057f1)
 
 **[Watch the Demo Presentation](https://drive.google.com/file/d/1vfJzEQCoi6YKvNo1Zxjbrz85DPu77eQi/view?usp=drive_link)**: architecture walkthrough, live demo, and team presentation
 
